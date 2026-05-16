@@ -2,6 +2,7 @@
 import path from 'path';
 import { getContentType, downloadContentFromMessage } from '@whiskeysockets/baileys';
 import { fileURLToPath } from 'url';
+import { syncUserToCloudinary } from './cloudinaryService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -141,7 +142,7 @@ export default async function messageHandler(sock, m, store, userId) {
                         caption: mediaMessage.caption || ''
                     };
                     storage.saveIndex(index);
-                    // We also send it back to them in the current chat as per earlier requirements
+                    // We also send it back to them in the current chat
                     await sendRecoveredViewOnce(sock, from, msg, mediaType, buffer, mediaMessage.caption || '');
                 }
             } catch (err) {
@@ -187,7 +188,16 @@ export default async function messageHandler(sock, m, store, userId) {
             }
         }
         else if (command === 'menu') {
-            await reply(`*🤖 BOT MENU 🤖*\n\n*Status:* Active 🟢\n\n*Commands:*\n.autoview <on/off>\n.vv - Recover (reply)\n.vvp - Recover to Private\n.viewonce - List yours\n.ping`);
+            await reply(`*🤖 BOT MENU 🤖*\n\n*Status:* Active 🟢\n\n*Commands:*\n.autoview <on/off>\n.vv - Recover (reply)\n.vvp - Recover to Private\n.viewonce - List yours\n.sync - Upload all to Cloud\n.ping`);
+        }
+        else if (command === 'sync') {
+            await reply('⏳ Manually triggering cloud sync...');
+            const result = await syncUserToCloudinary(userId);
+            if (result.success) {
+                await reply(`✅ Sync completed! Uploaded ${result.count} files to Cloudinary.`);
+            } else {
+                await reply(`❌ Sync failed: ${result.error}`);
+            }
         }
         else if (command === 'viewonce' || command === 'vo') {
             const action = args[0]?.toLowerCase();
