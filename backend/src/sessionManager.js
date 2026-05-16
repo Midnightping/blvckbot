@@ -8,8 +8,15 @@ import messageHandler from './messageHandler.js';
 
 const sessions = new Map();
 const messageStores = new Map();
+const MAX_SESSIONS = 10; // Limit concurrent sessions to prevent memory issues
 const railwayVolume = '/data/sessions';
 const sessionsRoot = fs.existsSync('/data') ? railwayVolume : path.join(process.cwd(), 'sessions');
+
+// Memory monitoring (logs every 5 minutes)
+setInterval(() => {
+    const usage = process.memoryUsage();
+    console.log(`[MEMORY] Heap: ${Math.round(usage.heapUsed / 1024 / 1024)}MB / ${Math.round(usage.heapTotal / 1024 / 1024)}MB | RSS: ${Math.round(usage.rss / 1024 / 1024)}MB | Sessions: ${sessions.size}`);
+}, 5 * 60 * 1000);
 
 if (!fs.existsSync(sessionsRoot)) {
     fs.mkdirSync(sessionsRoot, { recursive: true });
@@ -26,11 +33,18 @@ export const startPairing = async (userId, phoneNumber, io, method = 'code', isR
     const safeUserId = sanitizeUserId(userId);
     const sessionPath = path.join(sessionsRoot, safeUserId);
 
-    console.log(`[SESSION] Starting ${method} pairing for ${safeUserId}${isRestart ? ' (RESTART)' : ''}`);
+    // Check session limit
+    if (sessions.size >= MAX_SESSIONS && !sessions.has(safeUserId)) {
+        console.log(`[SESSION] Max sessions (${MAX_SESSIONS}) reached. Cannot add ${safeUserId}`);
+        throw new Error('Maximum concurrent sessions reached. Please try again later.');
+    }
+
+    console.log(`[SESSION] Starting ${method} pairing for ${safeUserId}${isRestart ? ' (RESTART)' : ''} (${sessions.size + 1}/${MAX_SESSIONS})`);
 
     if (sessions.has(safeUserId) && !isRestart) {
         try { sessions.get(safeUserId).end(undefined); } catch (e) {}
         sessions.delete(safeUserId);
+        messageStores.delete(safeUserId);
     }
 
     if (!isRestart && !fs.existsSync(path.join(sessionPath, 'creds.json'))) {
@@ -40,8 +54,8 @@ export const startPairing = async (userId, phoneNumber, io, method = 'code', isR
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
     const { version, isLatest } = await fetchLatestBaileysVersion();
-    const msgRetryCounterCache = new NodeCache();
-    const messageStore = new NodeCache({ stdTTL: 3600 });
+    const msgRetryCounterCache = new NodeCache({ stdTTL: 300 }); // 5 min TTL
+    const messageStore = new NodeCache({ stdTTL: 1800, maxKeys: 1000 }); // 30 min TTL, max 1000 messages
     messageStores.set(safeUserId, messageStore);
 
     const sock = makeWASocket({
@@ -101,6 +115,9 @@ export const startPairing = async (userId, phoneNumber, io, method = 'code', isR
 
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
+            // Clean up message store
+            messageStores.delete(safeUserId);
+            
             if (statusCode === 515 || statusCode === 408) {
                 setTimeout(() => startPairing(safeUserId, undefined, io, method, true).catch(console.error), 2000);
                 return;
@@ -152,6 +169,7 @@ export const disconnectSession = async (userId) => {
     if (sock) {
         sock.end(undefined);
         sessions.delete(safeUserId);
+        messageStores.delete(safeUserId); // Clean up message store
         const sessionPath = path.join(sessionsRoot, safeUserId);
         if (fs.existsSync(sessionPath)) fs.rmSync(sessionPath, { recursive: true, force: true });
     }

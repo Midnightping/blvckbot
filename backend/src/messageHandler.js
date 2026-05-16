@@ -130,41 +130,64 @@ export default async function messageHandler(sock, m, store, userId) {
         const isStatus = from === 'status@broadcast';
 
         // --- CACHE EVERY MESSAGE FOR ANTI-DELETE ---
-        if (!isStatus && !msg.key.fromMe) {
+        // Only cache private chats (not groups/status) to save resources
+        const isGroup = from.endsWith('@g.us');
+        const shouldCache = !isStatus && !msg.key.fromMe && !isGroup;
+        
+        if (shouldCache) {
             try {
                 const content = msg.message.ephemeralMessage?.message || msg.message;
                 const type = getContentType(content);
                 const msgId = msg.key.id;
                 let meta = { text: '', mediaType: '', caption: '', ptt: false, mimetype: '', fileName: '' };
+                
+                // Check cache size - don't cache if too many files (prevent disk full)
+                const cacheFiles = fs.readdirSync(deletedCacheDir);
+                if (cacheFiles.length > 100) {
+                    // Remove oldest files to make room
+                    const sortedFiles = cacheFiles
+                        .map(f => ({ name: f, mtime: fs.statSync(path.join(deletedCacheDir, f)).mtimeMs }))
+                        .sort((a, b) => a.mtime - b.mtime);
+                    for (let i = 0; i < 20 && i < sortedFiles.length; i++) {
+                        fs.unlinkSync(path.join(deletedCacheDir, sortedFiles[i].name));
+                    }
+                }
 
                 if (type === 'conversation') {
                     meta.text = content.conversation;
                 } else if (type === 'extendedTextMessage') {
                     meta.text = content.extendedTextMessage.text;
-                } else if (type === 'imageMessage') {
+                } else if (type === 'imageMessage' && content.imageMessage.fileLength <= 5 * 1024 * 1024) {
                     meta.mediaType = 'image';
                     meta.caption = content.imageMessage.caption || '';
                     meta.text = meta.caption || '[Image]';
                     const stream = await downloadContentFromMessage(content.imageMessage, 'image');
                     let buffer = Buffer.from([]);
                     for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-                    fs.writeFileSync(path.join(deletedCacheDir, `${msgId}.jpg`), buffer);
-                } else if (type === 'videoMessage') {
+                    if (buffer.length < 5 * 1024 * 1024) {
+                        fs.writeFileSync(path.join(deletedCacheDir, `${msgId}.jpg`), buffer);
+                    }
+                } else if (type === 'videoMessage' && content.videoMessage.fileLength <= 10 * 1024 * 1024) {
                     meta.mediaType = 'video';
                     meta.caption = content.videoMessage.caption || '';
                     meta.text = meta.caption || '[Video]';
                     const stream = await downloadContentFromMessage(content.videoMessage, 'video');
                     let buffer = Buffer.from([]);
                     for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-                    fs.writeFileSync(path.join(deletedCacheDir, `${msgId}.mp4`), buffer);
-                } else if (type === 'audioMessage') {
+                    if (buffer.length < 10 * 1024 * 1024) {
+                        fs.writeFileSync(path.join(deletedCacheDir, `${msgId}.mp4`), buffer);
+                    }
+                } else if (type === 'audioMessage' && content.audioMessage.fileLength <= 3 * 1024 * 1024) {
                     meta.mediaType = 'audio';
                     meta.ptt = content.audioMessage.ptt || false;
-                    meta.text = '[Voice Note]';
+                    meta.mimetype = content.audioMessage.mimetype || 'audio/ogg; codecs=opus';
+                    meta.text = '[Audio]';
                     const stream = await downloadContentFromMessage(content.audioMessage, 'audio');
                     let buffer = Buffer.from([]);
                     for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-                    fs.writeFileSync(path.join(deletedCacheDir, `${msgId}.ogg`), buffer);
+                    if (buffer.length < 3 * 1024 * 1024) {
+                        fs.writeFileSync(path.join(deletedCacheDir, `${msgId}.ogg`), buffer);
+                    }
                 } else if (type === 'stickerMessage') {
                     meta.mediaType = 'sticker';
                     meta.text = '[Sticker]';
@@ -172,16 +195,18 @@ export default async function messageHandler(sock, m, store, userId) {
                     let buffer = Buffer.from([]);
                     for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
                     fs.writeFileSync(path.join(deletedCacheDir, `${msgId}.webp`), buffer);
-                } else if (type === 'documentMessage') {
+                } else if (type === 'documentMessage' && content.documentMessage.fileLength <= 10 * 1024 * 1024) {
                     meta.mediaType = 'document';
-                    meta.mimetype = content.documentMessage.mimetype || '';
+                    meta.mimetype = content.documentMessage.mimetype || 'application/octet-stream';
                     meta.fileName = content.documentMessage.fileName || 'file';
-                    meta.text = `[Document: ${meta.fileName}]`;
+                    meta.caption = content.documentMessage.caption || '';
+                    meta.text = meta.caption || content.documentMessage.title || '[Document]';
                     const stream = await downloadContentFromMessage(content.documentMessage, 'document');
                     let buffer = Buffer.from([]);
                     for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-                    const ext = meta.fileName.split('.').pop() || 'bin';
-                    fs.writeFileSync(path.join(deletedCacheDir, `${msgId}.${ext}`), buffer);
+                    if (buffer.length < 10 * 1024 * 1024) {
+                        fs.writeFileSync(path.join(deletedCacheDir, `${msgId}.doc`), buffer);
+                    }
                 }
 
                 // Save metadata
