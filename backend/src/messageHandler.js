@@ -43,6 +43,34 @@ const sendRecoveredViewOnce = async (sock, from, msg, mediaType, buffer, caption
     else if (mediaType === 'audio') await sock.sendMessage(from, { audio: buffer, mimetype: 'audio/mpeg' }, { quoted: msg });
 };
 
+// --- ROBUST TEXT EXTRACTION (MIRRORED FROM OTHER BOT + IMPROVEMENTS) ---
+const extractText = (msg) => {
+    if (!msg) return '';
+    
+    // Support Baileys message structure
+    const content = msg.message || msg;
+    const type = getContentType(content);
+    if (!type) return '';
+
+    // Standard text
+    if (type === 'conversation') return content.conversation;
+    // Extended text (with link previews/mentions)
+    if (type === 'extendedTextMessage') return content.extendedTextMessage.text;
+    
+    // Unwrap Ephemeral/ViewOnce
+    if (type === 'ephemeralMessage') return extractText(content.ephemeralMessage.message);
+    if (type === 'viewOnceMessageV2') return extractText(content.viewOnceMessageV2.message);
+    if (type === 'viewOnceMessageV2Extension') return extractText(content.viewOnceMessageV2Extension.message);
+    if (type === 'viewOnceMessage') return extractText(content.viewOnceMessage.message);
+
+    // Media Captions
+    if (type === 'imageMessage') return content.imageMessage.caption || '[Image]';
+    if (type === 'videoMessage') return content.videoMessage.caption || '[Video]';
+    if (type === 'documentMessage') return content.documentMessage.caption || content.documentMessage.title || '[Document]';
+    
+    return '';
+};
+
 export default async function messageHandler(sock, m, store, userId) {
     try {
         if (m.type !== 'notify') return;
@@ -51,20 +79,32 @@ export default async function messageHandler(sock, m, store, userId) {
         const { state, index, viewOnceDir } = storage;
         const from = msg.key.remoteJid;
 
+        // --- ANTI-DELETE (RE-ENGINEERED) ---
         if (msg.message?.protocolMessage?.type === 0) {
             const deletedKey = msg.message.protocolMessage.key;
             if (store) {
                 const oldMsg = store.get(deletedKey.id);
                 if (oldMsg && oldMsg.message) {
-                    const type = getContentType(oldMsg.message);
-                    let contentText = '';
-                    if (type === 'conversation') contentText = oldMsg.message.conversation;
-                    else if (type === 'extendedTextMessage') contentText = oldMsg.message.extendedTextMessage.text;
-                    else if (type === 'imageMessage') contentText = `[Image attached: ${oldMsg.message.imageMessage.caption || ''}]`;
-                    else if (type === 'videoMessage') contentText = `[Video attached: ${oldMsg.message.videoMessage.caption || ''}]`;
+                    const contentText = extractText(oldMsg);
+                    const sender = (deletedKey.participant || deletedKey.remoteJid).split('@')[0];
+                    
+                    const reportText = `╭━━━〔 *𝐀𝐍𝐓𝐈-𝐃𝐄𝐋𝐄𝐓𝐄* 〕━━━┈⊷
+┃
+┃  *👤 From:* @${sender}
+┃  *📝 Content:*
+┃  ${contentText || '_[Media Content Below]_'}
+┃
+╰━━━━━━━━━━━━━━━┈⊷`;
 
-                    await sock.sendMessage(from, { text: `🚨 *Anti-Delete Intercept* 🚨\nA message was deleted!\n\n_Recovered text:_\n${contentText}` });
-                    try { await sock.sendMessage(from, { forward: oldMsg, force: true }); } catch (err) {}
+                    await sock.sendMessage(from, { 
+                        text: reportText,
+                        mentions: [deletedKey.participant || deletedKey.remoteJid]
+                    });
+                    
+                    try { 
+                        // Native forward works for stickers, audio, and all media types
+                        await sock.sendMessage(from, { forward: oldMsg, force: true }); 
+                    } catch (err) {}
                 }
             }
             return;
@@ -73,15 +113,14 @@ export default async function messageHandler(sock, m, store, userId) {
         if (!msg.message) return;
         const isStatus = from === 'status@broadcast';
 
+        // View-Once Detection
         let viewOnceContent = msg.message.viewOnceMessageV2?.message || 
                             msg.message.viewOnceMessageV2Extension?.message ||
                             msg.message.viewOnceMessage?.message ||
                             msg.message;
 
         const msgType = getContentType(viewOnceContent);
-        const isViewOnce = viewOnceContent?.[msgType]?.viewOnce;
-
-        if (isViewOnce) {
+        if (viewOnceContent?.[msgType]?.viewOnce) {
             try {
                 let mediaType = ''; let mediaMessage = null; let extension = '';
                 if (msgType === 'imageMessage') { mediaType = 'image'; mediaMessage = viewOnceContent.imageMessage; extension = 'jpg'; }
@@ -106,13 +145,7 @@ export default async function messageHandler(sock, m, store, userId) {
             return;
         }
 
-        const type = getContentType(msg.message);
-        let text = '';
-        if (type === 'conversation') text = msg.message.conversation;
-        else if (type === 'extendedTextMessage') text = msg.message.extendedTextMessage.text;
-        else if (type === 'imageMessage' && msg.message.imageMessage.caption) text = msg.message.imageMessage.caption;
-        else if (type === 'videoMessage' && msg.message.videoMessage.caption) text = msg.message.videoMessage.caption;
-
+        const text = extractText(msg);
         if (!text.startsWith('.')) return;
         const args = text.slice(1).trim().split(/ +/);
         const command = args.shift().toLowerCase();
@@ -161,36 +194,20 @@ export default async function messageHandler(sock, m, store, userId) {
             const contextInfo = msg.message.extendedTextMessage?.contextInfo;
             const isQuoted = !!contextInfo?.quotedMessage;
             if (!isQuoted) return reply(`❌ Reply to a status or media with *.${command}* to download it.`);
-            
             const quotedMsg = contextInfo.quotedMessage;
             const qType = getContentType(quotedMsg);
-            
             if (qType === 'imageMessage' || qType === 'videoMessage' || qType === 'audioMessage') {
                 try {
                     const mType = qType.replace('Message', '');
                     const stream = await downloadContentFromMessage(quotedMsg[qType], mType);
                     let buffer = Buffer.from([]);
                     for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-                    
-                    const caption = quotedMsg[qType].caption || '';
-                    
-                    // Determine Target JID
-                    let targetJid;
-                    if (command === 'savep') {
-                        targetJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
-                    } else {
-                        // If it is a status reply, 'from' might be status@broadcast, so we use quoted participant
-                        targetJid = (from === 'status@broadcast') ? contextInfo.participant : from;
-                    }
-                    
-                    if (mType === 'image') await sock.sendMessage(targetJid, { image: buffer, caption: `📥 *Saved Media*\n\n${caption}` });
-                    else if (mType === 'video') await sock.sendMessage(targetJid, { video: buffer, caption: `📥 *Saved Media*\n\n${caption}` });
+                    const targetJid = command === 'savep' ? (sock.user.id.split(':')[0] + '@s.whatsapp.net') : ((from === 'status@broadcast') ? contextInfo.participant : from);
+                    if (mType === 'image') await sock.sendMessage(targetJid, { image: buffer, caption: `📥 *Saved Media*\n\n${quotedMsg[qType].caption || ''}` });
+                    else if (mType === 'video') await sock.sendMessage(targetJid, { video: buffer, caption: `📥 *Saved Media*\n\n${quotedMsg[qType].caption || ''}` });
                     else if (mType === 'audio') await sock.sendMessage(targetJid, { audio: buffer, mimetype: 'audio/mpeg' });
-                    
                     await sock.sendMessage(from, { react: { text: "✅", key: msg.key } });
-                } catch (err) { await reply('❌ Failed to save media.'); }
-            } else {
-                await reply('❌ The replied message is not a media file.');
+                } catch (err) { await reply('❌ Failed.'); }
             }
         }
         else if (command === 'viewonce' || command === 'vo') {
@@ -203,11 +220,12 @@ export default async function messageHandler(sock, m, store, userId) {
                 await reply(listText + `Use .viewonce get <id>`);
             } else if (action === 'get') {
                 const saved = index[args[1]];
-                if (!saved) return reply('❌ Not found.');
-                const buffer = fs.readFileSync(path.join(viewOnceDir, saved.filename));
-                if (saved.type === 'image') await sock.sendMessage(from, { image: buffer, caption: `🔒 Recovered\n${saved.caption}` }, { quoted: msg });
-                else if (saved.type === 'video') await sock.sendMessage(from, { video: buffer, caption: `🔒 Recovered\n${saved.caption}` }, { quoted: msg });
-                else if (saved.type === 'audio') await sock.sendMessage(from, { audio: buffer, mimetype: 'audio/mpeg' }, { quoted: msg });
+                if (saved) {
+                    const buffer = fs.readFileSync(path.join(viewOnceDir, saved.filename));
+                    if (saved.type === 'image') await sock.sendMessage(from, { image: buffer, caption: `🔒 Recovered\n${saved.caption}` }, { quoted: msg });
+                    else if (saved.type === 'video') await sock.sendMessage(from, { video: buffer, caption: `🔒 Recovered\n${saved.caption}` }, { quoted: msg });
+                    else if (saved.type === 'audio') await sock.sendMessage(from, { audio: buffer, mimetype: 'audio/mpeg' }, { quoted: msg });
+                }
             }
         }
         else if (command === 'vv' || command === 'vvp') {
