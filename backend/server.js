@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import { startPairing, getSessionStatus, disconnectSession } from './src/sessionManager.js';
+import { startPairing, getSessionStatus, disconnectSession, resumeAllSessions } from './src/sessionManager.js';
 import { syncAllUsersToCloudinary } from './src/cloudinaryService.js';
 
 dotenv.config();
@@ -16,6 +16,9 @@ const io = new Server(server, {
         methods: ['GET', 'POST']
     }
 });
+
+// Auto-resume all sessions on startup
+resumeAllSessions(io).catch(console.error);
 
 const PORT = process.env.PORT || 5000;
 
