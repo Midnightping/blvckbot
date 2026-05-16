@@ -20,27 +20,29 @@ const emitToUser = (io, userId, event, payload) => {
     io.to(`user:${userId}`).emit(event, payload);
 };
 
-export const startPairing = async (userId, phoneNumber, io, method = 'code') => {
+export const startPairing = async (userId, phoneNumber, io, method = 'code', isRestart = false) => {
     const safeUserId = sanitizeUserId(userId);
     const sessionPath = path.join(sessionsRoot, safeUserId);
 
-    console.log(`[SESSION] Starting ${method} pairing for ${safeUserId}`);
+    console.log(`[SESSION] Starting ${method} pairing for ${safeUserId}${isRestart ? ' (RESTART)' : ''}`);
 
     // End existing in-memory session
     if (sessions.has(safeUserId)) {
-        console.log(`[SESSION] Ending existing session for ${safeUserId}`);
+        console.log(`[SESSION] Ending existing in-memory session for ${safeUserId}`);
         try {
             sessions.get(safeUserId).end(undefined);
         } catch (e) {}
         sessions.delete(safeUserId);
     }
 
-    // Clear session folder for a clean start
-    if (fs.existsSync(sessionPath)) {
-        console.log(`[SESSION] Clearing session folder for ${safeUserId}`);
-        fs.rmSync(sessionPath, { recursive: true, force: true });
+    // Only clear session folder if NOT a restart
+    if (!isRestart) {
+        if (fs.existsSync(sessionPath)) {
+            console.log(`[SESSION] Clearing session folder for ${safeUserId}`);
+            fs.rmSync(sessionPath, { recursive: true, force: true });
+        }
+        fs.mkdirSync(sessionPath, { recursive: true });
     }
-    fs.mkdirSync(sessionPath, { recursive: true });
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
     const { version, isLatest } = await fetchLatestBaileysVersion();
@@ -56,7 +58,7 @@ export const startPairing = async (userId, phoneNumber, io, method = 'code') => 
         msgRetryCounterCache,
         generateHighQualityLinkPreview: true,
         printQRInTerminal: false,
-        browser: ["BlvckBot", "Chrome", "20.0.04"],
+        browser: ["BlvckBot", "Chrome", "121.0.6167.160"],
         syncFullHistory: false,
         markOnline: true,
         connectTimeoutMs: 60000,
@@ -95,8 +97,7 @@ export const startPairing = async (userId, phoneNumber, io, method = 'code') => 
             // 515 is a normal "restart required" after pairing
             if (statusCode === 515) {
                 console.log(`[SESSION] ${safeUserId} restarting connection (515)...`);
-                // Just restart without wiping everything
-                setTimeout(() => startPairing(safeUserId, phoneNumber, io, method).catch(console.error), 2000);
+                setTimeout(() => startPairing(safeUserId, phoneNumber, io, method, true).catch(console.error), 2000);
                 return;
             }
 
@@ -109,7 +110,7 @@ export const startPairing = async (userId, phoneNumber, io, method = 'code') => 
 
             if (shouldReconnect) {
                 console.log(`[SESSION] Reconnecting ${safeUserId}...`);
-                setTimeout(() => startPairing(safeUserId, phoneNumber, io, method).catch(console.error), 5000);
+                setTimeout(() => startPairing(safeUserId, phoneNumber, io, method, true).catch(console.error), 5000);
             } else {
                 sessions.delete(safeUserId);
             }
