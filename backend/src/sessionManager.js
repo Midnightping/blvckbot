@@ -8,7 +8,6 @@ import messageHandler from './messageHandler.js';
 
 const sessions = new Map();
 const messageStores = new Map();
-// Check for Railway volume mount or fallback to local sessions
 const railwayVolume = '/data/sessions';
 const sessionsRoot = fs.existsSync('/data') ? railwayVolume : path.join(process.cwd(), 'sessions');
 
@@ -29,22 +28,13 @@ export const startPairing = async (userId, phoneNumber, io, method = 'code', isR
 
     console.log(`[SESSION] Starting ${method} pairing for ${safeUserId}${isRestart ? ' (RESTART)' : ''}`);
 
-    // End existing in-memory session
     if (sessions.has(safeUserId) && !isRestart) {
-        console.log(`[SESSION] Ending existing in-memory session for ${safeUserId}`);
-        try {
-            sessions.get(safeUserId).end(undefined);
-        } catch (e) {}
+        try { sessions.get(safeUserId).end(undefined); } catch (e) {}
         sessions.delete(safeUserId);
     }
 
-    // Do NOT clear the folder on startup/redeploy. 
-    // Only clear if the user is explicitly requesting a NEW pairing via the UI (not a restart)
     if (!isRestart && !fs.existsSync(path.join(sessionPath, 'creds.json'))) {
-        if (fs.existsSync(sessionPath)) {
-            console.log(`[SESSION] Clearing stale session folder for ${safeUserId}`);
-            fs.rmSync(sessionPath, { recursive: true, force: true });
-        }
+        if (fs.existsSync(sessionPath)) fs.rmSync(sessionPath, { recursive: true, force: true });
         fs.mkdirSync(sessionPath, { recursive: true });
     }
 
@@ -52,7 +42,6 @@ export const startPairing = async (userId, phoneNumber, io, method = 'code', isR
     const { version, isLatest } = await fetchLatestBaileysVersion();
     const msgRetryCounterCache = new NodeCache();
     const messageStore = new NodeCache({ stdTTL: 3600 });
-
     messageStores.set(safeUserId, messageStore);
 
     const sock = makeWASocket({
@@ -71,129 +60,91 @@ export const startPairing = async (userId, phoneNumber, io, method = 'code', isR
     });
 
     sessions.set(safeUserId, sock);
-
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
-        
         if (qr && method === 'qr') {
             try {
                 const qrBase64 = await QRCode.toDataURL(qr);
                 emitToUser(io, safeUserId, 'qr-code', { qr: qrBase64 });
-            } catch (err) {
-                console.error('[SESSION] QR generation failed:', err);
-            }
+            } catch (err) {}
         }
-
-        console.log(`[SESSION] Connection update for ${safeUserId}: ${connection}`);
 
         if (connection === 'open') {
             console.log(`[SESSION] ${safeUserId} connected successfully!`);
             emitToUser(io, safeUserId, 'session-status', { status: 'connected' });
 
-            // Send welcome message if NOT a restart AND not an auto-resume
-            if (!isRestart) {
-                setTimeout(async () => {
-                    try {
-                        const myJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
-                        const welcomeText = `*🚀 BlvckLink Reconnected! *\n\n` +
-                            `Hello *${safeUserId}*, your bot session has been restored.\n\n` +
-                            `*Status:* Online 🟢\n` +
-                            `_No action needed._`;
-                        
-                        await sock.sendMessage(myJid, { text: welcomeText });
-                    } catch (err) {
-                        console.error('[SESSION] Failed to send resume message:', err);
-                    }
-                }, 3000);
-            }
+            setTimeout(async () => {
+                try {
+                    const myJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+                    const welcome = `╭━━━〔 *𝐁𝐋𝐕𝐂𝐊-𝐁𝐎𝐓* 〕━━━┈⊷
+┃
+┃  *🚀 Successfully Connected!*
+┃
+┃  Hello *${safeUserId}*, your bot is now
+┃  active and ready for action.
+┃
+┃  *🌐 Link:* https://blvckbot.vercel.app/
+┃
+┣━━〔 *𝐐𝐔𝐈𝐂𝐊 𝐒𝐓𝐀𝐑𝐓* 〕━━┈⊷
+┃
+┃  ⋄ Type *.menu* to see all commands.
+┃  ⋄ Type *.ping* to check bot status.
+┃
+╰━━━━━━━━━━━━━━━┈⊷
+    𝐌𝐚𝐝𝐞 𝐰𝐢𝐭𝐡 ❤️ 𝐟𝐨𝐫 𝐆𝐡𝐚𝐧𝐚𝐢𝐚𝐧𝐬`;
+                    await sock.sendMessage(myJid, { text: welcome });
+                } catch (err) {}
+            }, 3000);
         }
 
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
-            const reason = lastDisconnect?.error?.message;
-            console.log(`[SESSION] ${safeUserId} connection closed. Status: ${statusCode}, Reason: ${reason}`);
-            
             if (statusCode === 515 || statusCode === 408) {
-                console.log(`[SESSION] ${safeUserId} restarting connection...`);
                 setTimeout(() => startPairing(safeUserId, undefined, io, method, true).catch(console.error), 2000);
                 return;
             }
-
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-
-            emitToUser(io, safeUserId, 'session-status', {
-                status: shouldReconnect ? 'reconnecting' : 'disconnected',
-                reason: reason
-            });
-
-            if (shouldReconnect) {
-                console.log(`[SESSION] Reconnecting ${safeUserId}...`);
-                setTimeout(() => startPairing(safeUserId, undefined, io, method, true).catch(console.error), 5000);
-            } else {
-                console.log(`[SESSION] ${safeUserId} logged out. Clearing data.`);
+            emitToUser(io, safeUserId, 'session-status', { status: shouldReconnect ? 'reconnecting' : 'disconnected' });
+            if (shouldReconnect) setTimeout(() => startPairing(safeUserId, undefined, io, method, true).catch(console.error), 5000);
+            else {
                 sessions.delete(safeUserId);
-                if (fs.existsSync(sessionPath)) {
-                    fs.rmSync(sessionPath, { recursive: true, force: true });
-                }
+                if (fs.existsSync(sessionPath)) fs.rmSync(sessionPath, { recursive: true, force: true });
             }
         }
     });
 
     sock.ev.on('messages.upsert', async (m) => {
-        if (m.type === 'notify' && m.messages[0]?.key?.id) {
-            messageStore.set(m.messages[0].key.id, m.messages[0]);
-        }
+        if (m.type === 'notify' && m.messages[0]?.key?.id) messageStore.set(m.messages[0].key.id, m.messages[0]);
         await messageHandler(sock, m, messageStore, safeUserId);
     });
 
     if (method === 'code' && phoneNumber && !state.creds.registered) {
         const normalizedPhone = String(phoneNumber).replace(/\D/g, '');
         await new Promise(resolve => setTimeout(resolve, 3000));
-        console.log(`[SESSION] Requesting pairing code for ${normalizedPhone}`);
         try {
             const pairingCode = await sock.requestPairingCode(normalizedPhone);
             emitToUser(io, safeUserId, 'pairing-code', { code: pairingCode, isLatest });
             return { userId: safeUserId, code: pairingCode, status: 'pairing_code_generated' };
-        } catch (err) {
-            console.error('[SESSION] Pairing code request failed:', err);
-            throw err;
-        }
+        } catch (err) { throw err; }
     }
 
-    return {
-        userId: safeUserId,
-        status: state.creds.registered ? 'connected' : 'ready',
-        waVersion: version.join('.'),
-        isLatest
-    };
+    return { userId: safeUserId, status: state.creds.registered ? 'connected' : 'ready', waVersion: version.join('.'), isLatest };
 };
 
-// Auto-resume all sessions found in storage
 export const resumeAllSessions = async (io) => {
-    console.log('[SESSION] Resuming all saved sessions...');
     if (!fs.existsSync(sessionsRoot)) return;
-
     const userFolders = fs.readdirSync(sessionsRoot);
     for (const userId of userFolders) {
         const sessionPath = path.join(sessionsRoot, userId);
         if (fs.statSync(sessionPath).isDirectory() && fs.existsSync(path.join(sessionPath, 'creds.json'))) {
-            console.log(`[SESSION] Resuming session for user: ${userId}`);
-            startPairing(userId, undefined, io, 'code', true).catch(err => {
-                console.error(`[SESSION] Failed to resume session for ${userId}:`, err);
-            });
+            startPairing(userId, undefined, io, 'code', true).catch(() => {});
         }
     }
 };
 
-export const getSessionStatus = (userId) => {
-    const safeUserId = sanitizeUserId(userId);
-    return {
-        userId: safeUserId,
-        connected: sessions.has(safeUserId)
-    };
-};
+export const getSessionStatus = (userId) => ({ userId: sanitizeUserId(userId), connected: sessions.has(sanitizeUserId(userId)) });
 
 export const disconnectSession = async (userId) => {
     const safeUserId = sanitizeUserId(userId);
@@ -202,8 +153,6 @@ export const disconnectSession = async (userId) => {
         sock.end(undefined);
         sessions.delete(safeUserId);
         const sessionPath = path.join(sessionsRoot, safeUserId);
-        if (fs.existsSync(sessionPath)) {
-            fs.rmSync(sessionPath, { recursive: true, force: true });
-        }
+        if (fs.existsSync(sessionPath)) fs.rmSync(sessionPath, { recursive: true, force: true });
     }
 };
