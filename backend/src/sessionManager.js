@@ -23,10 +23,23 @@ export const startPairing = async (userId, phoneNumber, io) => {
     const safeUserId = sanitizeUserId(userId);
     const sessionPath = path.join(sessionsRoot, safeUserId);
 
+    console.log(`[SESSION] Starting pairing for ${safeUserId}`);
+
+    // End existing in-memory session
     if (sessions.has(safeUserId)) {
-        sessions.get(safeUserId).end(undefined);
+        console.log(`[SESSION] Ending existing session for ${safeUserId}`);
+        try {
+            sessions.get(safeUserId).end(undefined);
+        } catch (e) {}
         sessions.delete(safeUserId);
     }
+
+    // Clear session folder for a clean start
+    if (fs.existsSync(sessionPath)) {
+        console.log(`[SESSION] Clearing session folder for ${safeUserId}`);
+        fs.rmSync(sessionPath, { recursive: true, force: true });
+    }
+    fs.mkdirSync(sessionPath, { recursive: true });
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
     const { version, isLatest } = await fetchLatestBaileysVersion();
@@ -81,6 +94,11 @@ export const startPairing = async (userId, phoneNumber, io) => {
     });
 
     const normalizedPhone = String(phoneNumber).replace(/\D/g, '');
+    
+    // Small delay to ensure socket is ready
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    console.log(`[SESSION] Requesting pairing code for ${normalizedPhone}`);
     const pairingCode = await sock.requestPairingCode(normalizedPhone);
 
     emitToUser(io, safeUserId, 'pairing-code', { code: pairingCode, isLatest });
