@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { startPairing, getSessionStatus, disconnectSession } from './src/sessionManager.js';
+import { syncAllUsersToDrive } from './src/driveService.js';
 
 dotenv.config();
 
@@ -63,6 +64,9 @@ io.on('connection', (socket) => {
         socket.join(`user:${userId}`);
     });
 });
+
+// Start hourly sync (3600000ms = 1 hour)
+setInterval(syncAllUsersToDrive, 3600000);
 
 server.listen(PORT, () => {
     console.log(`[BlvckBot] API running on port ${PORT}`);
