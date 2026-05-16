@@ -281,6 +281,7 @@ export default async function messageHandler(sock, m, store, userId) {
 ┣━━〔 *𝐌𝐀𝐈𝐍 𝐂𝐎𝐌𝐌𝐀𝐍𝐃𝐒* 〕━━┈⊷
 ┃
 ┃  ⋄ *.ai*   - Ask AI (Gemini)
+┃  ⋄ *.hack* <name> - Fun hack simulation
 ┃  ⋄ *.sticker* - Convert image/video to sticker
 ┃  ⋄ *.vv*   - Recover View-Once
 ┃  ⋄ *.vvp*  - Recover View-Once
@@ -307,6 +308,10 @@ export default async function messageHandler(sock, m, store, userId) {
         else if (command === 'sticker') {
             const { default: handleSticker } = await import('./commands/sticker.js');
             await handleSticker(sock, from, msg, reply);
+        }
+        else if (command === 'hack') {
+            const { default: handleHack } = await import('./commands/hack.js');
+            await handleHack(sock, from, msg, args, reply);
         }
         else if (command === 'sync') {
             const result = await syncUserToCloudinary(userId);
