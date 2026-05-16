@@ -342,7 +342,10 @@ export default async function messageHandler(sock, m, store, userId) {
                     if (command === 'vvp') {
                         // Send to private (self) chat
                         const myJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
-                        const senderNum = (msg.key.participant || from).split('@')[0];
+                        // Clean the sender number (remove :device suffixes and @s.whatsapp.net)
+                        const rawSender = (msg.key.participant || from).split('@')[0].split(':')[0];
+                        const senderNum = rawSender.startsWith('+') ? rawSender : `+${rawSender}`;
+                        
                         const privateCaption = `✅ *View-Once Retrieved*\n👤 *From:* ${senderNum}\n\n${originalCaption}`;
                         
                         if (mediaType === 'image') {
