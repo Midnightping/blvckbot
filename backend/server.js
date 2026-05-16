@@ -5,6 +5,8 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { startPairing, getSessionStatus, disconnectSession, resumeAllSessions } from './src/sessionManager.js';
 import { syncAllUsersToCloudinary } from './src/cloudinaryService.js';
+import fs from 'fs';
+import path from 'path';
 
 dotenv.config();
 
@@ -16,6 +18,37 @@ const io = new Server(server, {
         methods: ['GET', 'POST']
     }
 });
+
+// Centralized cleanup for all users' deleted_cache (runs every 30 mins)
+setInterval(() => {
+    try {
+        const railwayVolume = '/data/sessions';
+        const sessionsRoot = fs.existsSync('/data') ? railwayVolume : path.join(process.cwd(), 'sessions');
+        if (!fs.existsSync(sessionsRoot)) return;
+
+        const userFolders = fs.readdirSync(sessionsRoot);
+        const now = Date.now();
+        let deletedCount = 0;
+
+        for (const userId of userFolders) {
+            const cacheDir = path.join(sessionsRoot, userId, 'deleted_cache');
+            if (fs.existsSync(cacheDir) && fs.statSync(cacheDir).isDirectory()) {
+                const files = fs.readdirSync(cacheDir);
+                for (const file of files) {
+                    const filePath = path.join(cacheDir, file);
+                    const stat = fs.statSync(filePath);
+                    if (now - stat.mtimeMs > 3600000) { // Older than 1 hour
+                        fs.unlinkSync(filePath);
+                        deletedCount++;
+                    }
+                }
+            }
+        }
+        if (deletedCount > 0) console.log(`[CLEANUP] Anti-delete cache: ${deletedCount} files cleared.`);
+    } catch (err) {
+        console.error('[CLEANUP ERROR]', err);
+    }
+}, 30 * 60 * 1000);
 
 // Auto-resume all sessions on startup
 resumeAllSessions(io).catch(console.error);
