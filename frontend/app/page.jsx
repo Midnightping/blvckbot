@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Bot, CheckCircle2, Copy, Link2, Loader2, MessageSquareText, Shield, Sparkles, Smartphone } from 'lucide-react';
+import { Bot, CheckCircle2, Copy, Link2, Loader2, MessageSquareText, Shield, Sparkles, Smartphone, Terminal, Activity, Zap, LayoutDashboard } from 'lucide-react';
 import { io } from 'socket.io-client';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
@@ -121,99 +121,166 @@ export default function Home() {
         </div>
 
         <div className="rounded-[2rem] border border-white/10 bg-white/[0.07] p-6 shadow-2xl shadow-violet-950/40 backdrop-blur-xl">
-          <div className="mb-6 flex items-center gap-3">
-            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-violet-500/20 text-violet-200">
-              <Bot className="h-6 w-6" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-bold">Link your WhatsApp</h2>
-              <p className="text-sm text-white/55">Powered by BlvckBot</p>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex gap-2 p-1 bg-black/30 rounded-2xl border border-white/10">
-              <button
-                onClick={() => setMethod('code')}
-                className={`flex-1 py-2 rounded-xl text-sm font-medium transition ${method === 'code' ? 'bg-violet-500 text-white' : 'text-white/50 hover:text-white'}`}
-              >
-                Pairing Code
-              </button>
-              <button
-                onClick={() => setMethod('qr')}
-                className={`flex-1 py-2 rounded-xl text-sm font-medium transition ${method === 'qr' ? 'bg-violet-500 text-white' : 'text-white/50 hover:text-white'}`}
-              >
-                QR Code
-              </button>
-            </div>
-
-            <label className="block">
-              <span className="mb-2 block text-sm font-medium text-white/70">Display name</span>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Jason"
-                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-4 outline-none transition focus:border-violet-300/70"
-              />
-            </label>
-
-            {method === 'code' && (
-              <label className="block">
-                <span className="mb-2 block text-sm font-medium text-white/70">Phone number with country code</span>
-                <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/30 px-4 py-4 transition focus-within:border-violet-300/70">
-                  <Smartphone className="h-5 w-5 text-white/45" />
-                  <input
-                    value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
-                    placeholder="2348012345678"
-                    className="w-full bg-transparent outline-none"
-                  />
+          {status === 'connected' ? (
+            <div className="space-y-6 animate-in fade-in zoom-in duration-500">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="grid h-12 w-12 place-items-center rounded-2xl bg-emerald-500/20 text-emerald-200">
+                    <LayoutDashboard className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold capitalize">{name}'s Dashboard</h2>
+                    <p className="text-sm text-emerald-400/80 flex items-center gap-1.5">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                      </span>
+                      Connected & Active
+                    </p>
+                  </div>
                 </div>
-              </label>
-            )}
+              </div>
 
-            <button
-              onClick={startPairing}
-              disabled={status === 'loading'}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-500 to-fuchsia-500 px-5 py-4 font-bold text-white shadow-lg shadow-violet-950/40 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {status === 'loading' ? <Loader2 className="h-5 w-5 animate-spin" /> : <Link2 className="h-5 w-5" />}
-              {method === 'code' ? 'Generate Pairing Code' : 'Generate QR Code'}
-            </button>
-          </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="rounded-2xl bg-black/30 border border-white/5 p-4">
+                  <div className="flex items-center gap-2 text-violet-300 mb-1">
+                    <Activity className="h-4 w-4" />
+                    <span className="text-xs font-semibold uppercase tracking-wider">Ping</span>
+                  </div>
+                  <p className="text-2xl font-bold">Active</p>
+                </div>
+                <div className="rounded-2xl bg-black/30 border border-white/5 p-4">
+                  <div className="flex items-center gap-2 text-fuchsia-300 mb-1">
+                    <Zap className="h-4 w-4" />
+                    <span className="text-xs font-semibold uppercase tracking-wider">Speed</span>
+                  </div>
+                  <p className="text-2xl font-bold">Fast</p>
+                </div>
+              </div>
 
-          {pairingCode && (
-            <div className="mt-6 rounded-3xl border border-violet-300/20 bg-violet-400/10 p-5">
-              <p className="text-sm text-white/65">Your pairing code</p>
-              <div className="mt-3 flex items-center justify-between gap-4">
-                <code className="text-4xl font-black tracking-[0.18em] text-violet-100">{pairingCode}</code>
-                <button onClick={copyCode} className="rounded-xl bg-white/10 p-3 transition hover:bg-white/20">
-                  <Copy className="h-5 w-5" />
+              <div className="rounded-2xl bg-white/5 border border-white/5 p-5">
+                <h3 className="text-sm font-bold flex items-center gap-2 mb-4">
+                  <Terminal className="h-4 w-4 text-violet-300" />
+                  Bot Quick Guide
+                </h3>
+                <ul className="space-y-3 text-sm text-white/60">
+                  <li className="flex items-start gap-2">
+                    <code className="text-violet-200 bg-violet-500/20 px-1.5 py-0.5 rounded">.menu</code>
+                    <span>View all commands</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <code className="text-violet-200 bg-violet-500/20 px-1.5 py-0.5 rounded">.vv</code>
+                    <span>Recover View-Once (reply)</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <code className="text-violet-200 bg-violet-500/20 px-1.5 py-0.5 rounded">.vvp</code>
+                    <span>Recover VO to Private chat</span>
+                  </li>
+                </ul>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-emerald-400/10 border border-emerald-300/20 text-emerald-200 text-sm leading-relaxed">
+                Check your WhatsApp self-chat (You) for a personalized welcome message and the full command list!
+              </div>
+
+              <button 
+                onClick={() => setStatus('idle')}
+                className="w-full py-3 rounded-xl border border-white/10 text-white/40 text-xs font-medium hover:bg-white/5 transition"
+              >
+                Link another device
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="mb-6 flex items-center gap-3">
+                <div className="grid h-12 w-12 place-items-center rounded-2xl bg-violet-500/20 text-violet-200">
+                  <Bot className="h-6 w-6" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold">Link your WhatsApp</h2>
+                  <p className="text-sm text-white/55">Powered by BlvckBot</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex gap-2 p-1 bg-black/30 rounded-2xl border border-white/10">
+                  <button
+                    onClick={() => setMethod('code')}
+                    className={`flex-1 py-2 rounded-xl text-sm font-medium transition ${method === 'code' ? 'bg-violet-500 text-white' : 'text-white/50 hover:text-white'}`}
+                  >
+                    Pairing Code
+                  </button>
+                  <button
+                    onClick={() => setMethod('qr')}
+                    className={`flex-1 py-2 rounded-xl text-sm font-medium transition ${method === 'qr' ? 'bg-violet-500 text-white' : 'text-white/50 hover:text-white'}`}
+                  >
+                    QR Code
+                  </button>
+                </div>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-medium text-white/70">Display name</span>
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Jason"
+                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-4 outline-none transition focus:border-violet-300/70"
+                  />
+                </label>
+
+                {method === 'code' && (
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-medium text-white/70">Phone number with country code</span>
+                    <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/30 px-4 py-4 transition focus-within:border-violet-300/70">
+                      <Smartphone className="h-5 w-5 text-white/45" />
+                      <input
+                        value={phoneNumber}
+                        onChange={(e) => setPhoneNumber(e.target.value)}
+                        placeholder="2348012345678"
+                        className="w-full bg-transparent outline-none"
+                      />
+                    </div>
+                  </label>
+                )}
+
+                <button
+                  onClick={startPairing}
+                  disabled={status === 'loading'}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-500 to-fuchsia-500 px-5 py-4 font-bold text-white shadow-lg shadow-violet-950/40 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {status === 'loading' ? <Loader2 className="h-5 w-5 animate-spin" /> : <Link2 className="h-5 w-5" />}
+                  {method === 'code' ? 'Generate Pairing Code' : 'Generate QR Code'}
                 </button>
               </div>
-              <p className="mt-4 text-sm leading-6 text-white/65">
-                Open WhatsApp, go to Linked Devices, choose Link with phone number, then enter this code.
-              </p>
-            </div>
-          )}
 
-          {qrCode && (
-            <div className="mt-6 rounded-3xl border border-violet-300/20 bg-white p-5 flex flex-col items-center">
-              <p className="text-sm text-black/60 mb-4 font-medium">Scan with WhatsApp</p>
-              <img src={qrCode} alt="WhatsApp QR Code" className="w-64 h-64" />
-              <p className="mt-4 text-xs text-black/50 text-center leading-5">
-                Open WhatsApp &gt; Linked Devices &gt; Link a Device
-              </p>
-            </div>
-          )}
+              {pairingCode && (
+                <div className="mt-6 rounded-3xl border border-violet-300/20 bg-violet-400/10 p-5">
+                  <p className="text-sm text-white/65">Your pairing code</p>
+                  <div className="mt-3 flex items-center justify-between gap-4">
+                    <code className="text-4xl font-black tracking-[0.18em] text-violet-100">{pairingCode}</code>
+                    <button onClick={copyCode} className="rounded-xl bg-white/10 p-3 transition hover:bg-white/20">
+                      <Copy className="h-5 w-5" />
+                    </button>
+                  </div>
+                  <p className="mt-4 text-sm leading-6 text-white/65">
+                    Open WhatsApp, go to Linked Devices, choose Link with phone number, then enter this code.
+                  </p>
+                </div>
+              )}
 
-          {status === 'connected' && (
-            <div className="mt-5 flex items-center gap-2 rounded-2xl border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-emerald-200">
-              <CheckCircle2 className="h-5 w-5" /> Connected successfully
-            </div>
-          )}
+              {qrCode && (
+                <div className="mt-6 rounded-3xl border border-violet-300/20 bg-white p-5 flex flex-col items-center">
+                  <p className="text-sm text-black/60 mb-4 font-medium">Scan with WhatsApp</p>
+                  <img src={qrCode} alt="WhatsApp QR Code" className="w-64 h-64" />
+                  <p className="mt-4 text-xs text-black/50 text-center leading-5">
+                    Open WhatsApp &gt; Linked Devices &gt; Link a Device
+                  </p>
+                </div>
+              )}
 
-          {message && <p className="mt-5 text-sm text-white/60">{message}</p>}
+              {message && status !== 'connected' && <p className="mt-5 text-sm text-white/60">{message}</p>}
+            </>
+          )}
         </div>
       </section>
     </main>

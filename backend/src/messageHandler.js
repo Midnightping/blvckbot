@@ -36,7 +36,7 @@ const saveViewOnceIndex = () => {
 };
 
 const sendRecoveredViewOnce = async (sock, from, msg, mediaType, buffer, caption) => {
-    const finalCaption = caption ? `🔒 ViewOnce Retrieved\n\n${caption}` : '🔒 ViewOnce Retrieved';
+    const finalCaption = caption ? `?? ViewOnce Retrieved\n\n${caption}` : '?? ViewOnce Retrieved';
 
     if (mediaType === 'image') {
         await sock.sendMessage(from, { image: buffer, caption: finalCaption }, { quoted: msg });
@@ -69,7 +69,7 @@ export default async function messageHandler(sock, m, store, userId) {
                     else if (type === 'videoMessage') contentText = `[Video attached: ${oldMsg.message.videoMessage.caption || ''}]`;
 
                     await sock.sendMessage(from, { 
-                        text: `🚨 *Anti-Delete Intercept* 🚨\nA message was deleted!\n\n_Recovered text:_\n${contentText}` 
+                        text: `?? *Anti-Delete Intercept* ??\nA message was deleted!\n\n_Recovered text:_\n${contentText}` 
                     });
                     
                     // Try to forward the original message to preserve media
@@ -180,28 +180,29 @@ export default async function messageHandler(sock, m, store, userId) {
 
         // 2. Route Commands
         if (command === 'ping') {
-            await reply('Pong! Bot is active 🤖');
+            await reply('Pong! Bot is active ??');
         } 
         else if (command === 'autoview') {
             const toggle = args[0]?.toLowerCase();
             if (toggle === 'on') {
                 botState.autoViewStatus = true;
                 saveState();
-                await reply('✅ Auto Status Viewer enabled.');
+                await reply('? Auto Status Viewer enabled.');
             } else if (toggle === 'off') {
                 botState.autoViewStatus = false;
                 saveState();
-                await reply('❌ Auto Status Viewer disabled.');
+                await reply('? Auto Status Viewer disabled.');
             } else {
                 await reply(`Auto Viewer is currently: ${botState.autoViewStatus ? 'ON' : 'OFF'}\nUse .autoview on/off`);
             }
         }
         else if (command === 'menu') {
-            const menuText = `*🤖 BOT MENU 🤖*\n\n` +
-                `*Status:* Active 🟢\n\n` +
+            const menuText = `*?? BOT MENU ??*\n\n` +
+                `*Status:* Active ??\n\n` +
                 `*Commands:*\n` +
                 `.autoview <on/off> - Toggle auto status reading.\n` +
-                `.vv - Reply to view-once message to retrieve and resend it.\n` +
+                `.vv - Reply to view-once message to retrieve and resend it here.\n` +
+                `.vvp - Reply to view-once message to send it to your private chat.\n` +
                 `.viewonce - List and retrieve saved view-once messages.\n` +
                 `.ping - Check if bot is alive.`;
             await reply(menuText);
@@ -213,11 +214,11 @@ export default async function messageHandler(sock, m, store, userId) {
                 // List all saved view-once messages
                 const savedKeys = Object.keys(viewOnceIndex);
                 if (savedKeys.length === 0) {
-                    await reply('📭 No saved view-once messages.');
+                    await reply('?? No saved view-once messages.');
                     return;
                 }
                 
-                let listText = `🔒 *Saved View-Once Messages*\n\n`;
+                let listText = `?? *Saved View-Once Messages*\n\n`;
                 savedKeys.forEach((key, index) => {
                     const item = viewOnceIndex[key];
                     const date = new Date(item.timestamp).toLocaleString();
@@ -229,29 +230,29 @@ export default async function messageHandler(sock, m, store, userId) {
             } else if (action === 'get') {
                 const msgId = args[1];
                 if (!msgId) {
-                    await reply('❌ Please provide a message ID. Use .viewonce to see the list.');
+                    await reply('? Please provide a message ID. Use .viewonce to see the list.');
                     return;
                 }
                 
                 const saved = viewOnceIndex[msgId];
                 if (!saved) {
-                    await reply('❌ Message not found. Use .viewonce to see the list.');
+                    await reply('? Message not found. Use .viewonce to see the list.');
                     return;
                 }
                 
                 const filepath = path.join(viewOnceDir, saved.filename);
                 if (!fs.existsSync(filepath)) {
-                    await reply('❌ File not found on disk.');
+                    await reply('? File not found on disk.');
                     return;
                 }
                 
-                await reply(`📤 Sending saved view-once ${saved.type}...`);
+                await reply(`?? Sending saved view-once ${saved.type}...`);
                 const buffer = fs.readFileSync(filepath);
                 
                 if (saved.type === 'image') {
-                    await sock.sendMessage(from, { image: buffer, caption: `🔒 Recovered view-once image\n${saved.caption}` }, { quoted: msg });
+                    await sock.sendMessage(from, { image: buffer, caption: `?? Recovered view-once image\n${saved.caption}` }, { quoted: msg });
                 } else if (saved.type === 'video') {
-                    await sock.sendMessage(from, { video: buffer, caption: `🔒 Recovered view-once video\n${saved.caption}` }, { quoted: msg });
+                    await sock.sendMessage(from, { video: buffer, caption: `?? Recovered view-once video\n${saved.caption}` }, { quoted: msg });
                 } else if (saved.type === 'audio') {
                     await sock.sendMessage(from, { audio: buffer, mimetype: 'audio/mpeg' }, { quoted: msg });
                 }
@@ -267,23 +268,23 @@ export default async function messageHandler(sock, m, store, userId) {
                 });
                 viewOnceIndex = {};
                 saveViewOnceIndex();
-                await reply('🗑️ All saved view-once messages cleared.');
+                await reply('??? All saved view-once messages cleared.');
             } else {
-                await reply('❌ Invalid action. Use: .viewonce, .viewonce get <id>, or .viewonce clear');
+                await reply('? Invalid action. Use: .viewonce, .viewonce get <id>, or .viewonce clear');
             }
         }
-        else if (command === 'vv') {
+        else if (command === 'vv' || command === 'vvp') {
             // Check if replying to a view-once message
             const isQuoted = !!msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
             if (!isQuoted) {
-                return reply('❌ Please reply to a view-once message with .vv');
+                return reply(`? Please reply to a view-once message with .${command}`);
             }
             
             const quotedMsg = msg.message.extendedTextMessage.contextInfo.quotedMessage;
             const quotedType = getContentType(quotedMsg);
             
             if (!quotedMsg[quotedType]?.viewOnce) {
-                return reply('❌ The replied message is not a view-once message.');
+                return reply('? The replied message is not a view-once message.');
             }
             
             try {
@@ -309,7 +310,7 @@ export default async function messageHandler(sock, m, store, userId) {
                 }
                 
                 if (mediaType && mediaMessage) {
-                    await reply('⏳ Retrieving view-once message...');
+                    await reply('? Retrieving view-once message...');
                     
                     const stream = await downloadContentFromMessage(mediaMessage, mediaType);
                     let buffer = Buffer.from([]);
@@ -334,17 +335,31 @@ export default async function messageHandler(sock, m, store, userId) {
                     };
                     saveViewOnceIndex();
                     
-                    console.log(`[VV] Saved and resending view-once ${mediaType}`);
+                    console.log(`[${command.toUpperCase()}] Saved and resending view-once ${mediaType}`);
 
-                    await sendRecoveredViewOnce(sock, from, msg, mediaType, buffer, originalCaption);
+                    if (command === 'vvp') {
+                        // Send to private (self) chat
+                        const myJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+                        const senderNum = (msg.key.participant || from).split('@')[0];
+                        const privateCaption = `?? ViewOnce Retrieved\n?? From: ${senderNum}\n\n${originalCaption}`;
+                        
+                        if (mediaType === 'image') {
+                            await sock.sendMessage(myJid, { image: buffer, caption: privateCaption });
+                        } else if (mediaType === 'video') {
+                            await sock.sendMessage(myJid, { video: buffer, caption: privateCaption });
+                        } else if (mediaType === 'audio') {
+                            await sock.sendMessage(myJid, { audio: buffer, mimetype: 'audio/mpeg' });
+                        }
+                        await reply('? Sent to your private chat.');
+                    } else {
+                        // Resend to the current chat
+                        await sendRecoveredViewOnce(sock, from, msg, mediaType, buffer, originalCaption);
+                    }
                 }
             } catch (err) {
-                console.error('[VV] Error retrieving view-once message:', err);
-                await reply('❌ Failed to retrieve view-once message.');
+                console.error(`[${command.toUpperCase()}] Error retrieving view-once message:`, err);
+                await reply('? Failed to retrieve view-once message.');
             }
-        }
-        else {
-            // unknown command
         }
 
     } catch (err) {

@@ -87,6 +87,28 @@ export const startPairing = async (userId, phoneNumber, io, method = 'code', isR
         if (connection === 'open') {
             console.log(`[SESSION] ${safeUserId} connected successfully!`);
             emitToUser(io, safeUserId, 'session-status', { status: 'connected' });
+
+            // Send welcome message if not a restart
+            if (!isRestart) {
+                setTimeout(async () => {
+                    try {
+                        const myJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+                        const welcomeText = `*🚀 BlvckLink Successfully Connected!*\n\n` +
+                            `Hello *${safeUserId}*, your bot is now active.\n\n` +
+                            `*Available Commands:*\n` +
+                            `.menu - Show all commands\n` +
+                            `.ping - Check bot status\n` +
+                            `.vv - Recover view-once (reply to one)\n` +
+                            `.vvp - Recover view-once to this private chat\n` +
+                            `.autoview on/off - Auto read statuses\n\n` +
+                            `_Enjoy your automation!_`;
+                        
+                        await sock.sendMessage(myJid, { text: welcomeText });
+                    } catch (err) {
+                        console.error('[SESSION] Failed to send welcome message:', err);
+                    }
+                }, 3000);
+            }
         }
 
         if (connection === 'close') {
