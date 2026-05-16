@@ -7,23 +7,18 @@ import { syncUserToCloudinary } from './cloudinaryService.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Helper to get user-specific storage paths
 const getUserStorage = (userId) => {
     const railwayVolume = '/data/sessions';
     const sessionsRoot = fs.existsSync('/data') ? railwayVolume : path.join(process.cwd(), 'sessions');
     const userDir = path.join(sessionsRoot, userId);
     
-    if (!fs.existsSync(userDir)) {
-        fs.mkdirSync(userDir, { recursive: true });
-    }
+    if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
 
     const statePath = path.join(userDir, 'bot_state.json');
     const viewOnceDir = path.join(userDir, 'viewonce_media');
     const viewOnceIndexPath = path.join(userDir, 'viewonce_index.json');
 
-    if (!fs.existsSync(viewOnceDir)) {
-        fs.mkdirSync(viewOnceDir, { recursive: true });
-    }
+    if (!fs.existsSync(viewOnceDir)) fs.mkdirSync(viewOnceDir, { recursive: true });
 
     let state = { autoViewStatus: false };
     if (fs.existsSync(statePath)) {
@@ -35,12 +30,7 @@ const getUserStorage = (userId) => {
         try { index = JSON.parse(fs.readFileSync(viewOnceIndexPath, 'utf8')); } catch (e) {}
     }
 
-    return {
-        state,
-        index,
-        statePath,
-        viewOnceDir,
-        viewOnceIndexPath,
+    return { state, index, statePath, viewOnceDir, viewOnceIndexPath,
         saveState: (newState) => fs.writeFileSync(statePath, JSON.stringify(newState, null, 2)),
         saveIndex: (newIndex) => fs.writeFileSync(viewOnceIndexPath, JSON.stringify(newIndex, null, 2))
     };
@@ -59,13 +49,14 @@ export default async function messageHandler(sock, m, store, userId) {
         const msg = m.messages[0];
         const storage = getUserStorage(userId);
         const { state, index, viewOnceDir } = storage;
+        const from = msg.key.remoteJid;
 
+        // Anti-Delete Logic
         if (msg.message?.protocolMessage?.type === 0) {
             const deletedKey = msg.message.protocolMessage.key;
             if (store) {
                 const oldMsg = store.get(deletedKey.id);
                 if (oldMsg && oldMsg.message) {
-                    const from = msg.key.remoteJid;
                     const type = getContentType(oldMsg.message);
                     let contentText = '';
                     if (type === 'conversation') contentText = oldMsg.message.conversation;
@@ -73,9 +64,7 @@ export default async function messageHandler(sock, m, store, userId) {
                     else if (type === 'imageMessage') contentText = `[Image attached: ${oldMsg.message.imageMessage.caption || ''}]`;
                     else if (type === 'videoMessage') contentText = `[Video attached: ${oldMsg.message.videoMessage.caption || ''}]`;
 
-                    await sock.sendMessage(from, { 
-                        text: `🚨 *Anti-Delete Intercept* 🚨\nA message was deleted!\n\n_Recovered text:_\n${contentText}` 
-                    });
+                    await sock.sendMessage(from, { text: `🚨 *Anti-Delete Intercept* 🚨\nA message was deleted!\n\n_Recovered text:_\n${contentText}` });
                     try { await sock.sendMessage(from, { forward: oldMsg, force: true }); } catch (err) {}
                 }
             }
@@ -83,18 +72,24 @@ export default async function messageHandler(sock, m, store, userId) {
         }
 
         if (!msg.message) return;
-        const from = msg.key.remoteJid;
         const isStatus = from === 'status@broadcast';
 
-        const msgType = getContentType(msg.message);
-        if (msg.message[msgType]?.viewOnce) {
+        // --- IMPROVED VIEW-ONCE DETECTION ---
+        let viewOnceContent = msg.message.viewOnceMessageV2?.message || 
+                            msg.message.viewOnceMessageV2Extension?.message ||
+                            msg.message.viewOnceMessage?.message ||
+                            msg.message;
+
+        const msgType = getContentType(viewOnceContent);
+        const isViewOnce = viewOnceContent?.[msgType]?.viewOnce;
+
+        if (isViewOnce) {
+            console.log(`[VIEW-ONCE] Automatically capturing media from ${from}`);
             try {
-                let mediaType = '';
-                let mediaMessage = null;
-                let extension = '';
-                if (msgType === 'imageMessage') { mediaType = 'image'; mediaMessage = msg.message.imageMessage; extension = 'jpg'; }
-                else if (msgType === 'videoMessage') { mediaType = 'video'; mediaMessage = msg.message.videoMessage; extension = 'mp4'; }
-                else if (msgType === 'audioMessage') { mediaType = 'audio'; mediaMessage = msg.message.audioMessage; extension = 'mp3'; }
+                let mediaType = ''; let mediaMessage = null; let extension = '';
+                if (msgType === 'imageMessage') { mediaType = 'image'; mediaMessage = viewOnceContent.imageMessage; extension = 'jpg'; }
+                else if (msgType === 'videoMessage') { mediaType = 'video'; mediaMessage = viewOnceContent.videoMessage; extension = 'mp4'; }
+                else if (msgType === 'audioMessage') { mediaType = 'audio'; mediaMessage = viewOnceContent.audioMessage; extension = 'mp3'; }
 
                 if (mediaType && mediaMessage) {
                     const stream = await downloadContentFromMessage(mediaMessage, mediaType);
@@ -102,11 +97,14 @@ export default async function messageHandler(sock, m, store, userId) {
                     for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
                     const filename = `${msg.key.id}.${extension}`;
                     fs.writeFileSync(path.join(viewOnceDir, filename), buffer);
+                    
                     index[msg.key.id] = { id: msg.key.id, from, type: mediaType, filename, timestamp: Date.now(), caption: mediaMessage.caption || '' };
                     storage.saveIndex(index);
+                    
+                    // Auto-resend recovered media
                     await sendRecoveredViewOnce(sock, from, msg, mediaType, buffer, mediaMessage.caption || '');
                 }
-            } catch (err) {}
+            } catch (err) { console.error('[VIEW-ONCE] Capture Failed:', err); }
         }
 
         if (isStatus) {
@@ -114,6 +112,7 @@ export default async function messageHandler(sock, m, store, userId) {
             return;
         }
 
+        // --- COMMAND PROCESSING ---
         const type = getContentType(msg.message);
         let text = '';
         if (type === 'conversation') text = msg.message.conversation;
@@ -185,14 +184,22 @@ export default async function messageHandler(sock, m, store, userId) {
         else if (command === 'vv' || command === 'vvp') {
             const isQuoted = !!msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
             if (!isQuoted) return reply(`❌ Reply to a view-once message.`);
+            
             const quotedMsg = msg.message.extendedTextMessage.contextInfo.quotedMessage;
-            const quotedType = getContentType(quotedMsg);
-            if (!quotedMsg[quotedType]?.viewOnce) return reply('❌ Not a view-once message.');
+            let unwrappedQuoted = quotedMsg.viewOnceMessageV2?.message || 
+                                quotedMsg.viewOnceMessageV2Extension?.message ||
+                                quotedMsg.viewOnceMessage?.message ||
+                                quotedMsg;
+
+            const qType = getContentType(unwrappedQuoted);
+            if (!unwrappedQuoted[qType]?.viewOnce) return reply('❌ Not a view-once message.');
+
             try {
                 let mediaType = ''; let mediaMessage = null;
-                if (quotedType === 'imageMessage') { mediaType = 'image'; mediaMessage = quotedMsg.imageMessage; }
-                else if (quotedType === 'videoMessage') { mediaType = 'video'; mediaMessage = quotedMsg.videoMessage; }
-                else if (quotedType === 'audioMessage') { mediaType = 'audio'; mediaMessage = quotedMsg.audioMessage; }
+                if (qType === 'imageMessage') { mediaType = 'image'; mediaMessage = unwrappedQuoted.imageMessage; }
+                else if (qType === 'videoMessage') { mediaType = 'video'; mediaMessage = unwrappedQuoted.videoMessage; }
+                else if (qType === 'audioMessage') { mediaType = 'audio'; mediaMessage = unwrappedQuoted.audioMessage; }
+                
                 if (mediaType && mediaMessage) {
                     if (command === 'vv') await reply('⏳ Retrieving...');
                     const stream = await downloadContentFromMessage(mediaMessage, mediaType);
