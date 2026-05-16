@@ -51,7 +51,6 @@ export default async function messageHandler(sock, m, store, userId) {
         const { state, index, viewOnceDir } = storage;
         const from = msg.key.remoteJid;
 
-        // Anti-Delete Logic
         if (msg.message?.protocolMessage?.type === 0) {
             const deletedKey = msg.message.protocolMessage.key;
             if (store) {
@@ -74,7 +73,6 @@ export default async function messageHandler(sock, m, store, userId) {
         if (!msg.message) return;
         const isStatus = from === 'status@broadcast';
 
-        // --- IMPROVED VIEW-ONCE DETECTION ---
         let viewOnceContent = msg.message.viewOnceMessageV2?.message || 
                             msg.message.viewOnceMessageV2Extension?.message ||
                             msg.message.viewOnceMessage?.message ||
@@ -84,7 +82,6 @@ export default async function messageHandler(sock, m, store, userId) {
         const isViewOnce = viewOnceContent?.[msgType]?.viewOnce;
 
         if (isViewOnce) {
-            console.log(`[VIEW-ONCE] Automatically capturing media from ${from}`);
             try {
                 let mediaType = ''; let mediaMessage = null; let extension = '';
                 if (msgType === 'imageMessage') { mediaType = 'image'; mediaMessage = viewOnceContent.imageMessage; extension = 'jpg'; }
@@ -97,14 +94,11 @@ export default async function messageHandler(sock, m, store, userId) {
                     for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
                     const filename = `${msg.key.id}.${extension}`;
                     fs.writeFileSync(path.join(viewOnceDir, filename), buffer);
-                    
                     index[msg.key.id] = { id: msg.key.id, from, type: mediaType, filename, timestamp: Date.now(), caption: mediaMessage.caption || '' };
                     storage.saveIndex(index);
-                    
-                    // Auto-resend recovered media
                     await sendRecoveredViewOnce(sock, from, msg, mediaType, buffer, mediaMessage.caption || '');
                 }
-            } catch (err) { console.error('[VIEW-ONCE] Capture Failed:', err); }
+            } catch (err) {}
         }
 
         if (isStatus) {
@@ -112,7 +106,6 @@ export default async function messageHandler(sock, m, store, userId) {
             return;
         }
 
-        // --- COMMAND PROCESSING ---
         const type = getContentType(msg.message);
         let text = '';
         if (type === 'conversation') text = msg.message.conversation;
@@ -145,7 +138,7 @@ export default async function messageHandler(sock, m, store, userId) {
 ┃
 ┃  ⋄ *.vv*  - Recover View-Once
 ┃  ⋄ *.vvp* - Recover to Private
-┃  ⋄ *.sync* - Cloud Upload ☁️
+┃  ⋄ *.save* - Save Status/Media 📥
 ┃  ⋄ *.menu* - Show this menu
 ┃  ⋄ *.ping* - Check bot speed
 ┃
@@ -159,10 +152,36 @@ export default async function messageHandler(sock, m, store, userId) {
             await reply(menu);
         }
         else if (command === 'sync') {
-            await reply('⏳ Manually triggering cloud sync...');
             const result = await syncUserToCloudinary(userId);
             if (result.success) await reply(`✅ Sync completed! Uploaded ${result.count} files.`);
             else await reply(`❌ Sync failed: ${result.error}`);
+        }
+        else if (command === 'save') {
+            const isQuoted = !!msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
+            if (!isQuoted) return reply(`❌ Reply to a status or media with *.save* to download it.`);
+            
+            const quotedMsg = msg.message.extendedTextMessage.contextInfo.quotedMessage;
+            const qType = getContentType(quotedMsg);
+            
+            if (qType === 'imageMessage' || qType === 'videoMessage' || qType === 'audioMessage') {
+                try {
+                    const mType = qType.replace('Message', '');
+                    const stream = await downloadContentFromMessage(quotedMsg[qType], mType);
+                    let buffer = Buffer.from([]);
+                    for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+                    
+                    const myJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+                    const caption = quotedMsg[qType].caption || '';
+                    
+                    if (mType === 'image') await sock.sendMessage(myJid, { image: buffer, caption: `📥 *Saved Media*\n\n${caption}` });
+                    else if (mType === 'video') await sock.sendMessage(myJid, { video: buffer, caption: `📥 *Saved Media*\n\n${caption}` });
+                    else if (mType === 'audio') await sock.sendMessage(myJid, { audio: buffer, mimetype: 'audio/mpeg' });
+                    
+                    await sock.sendMessage(from, { react: { text: "✅", key: msg.key } });
+                } catch (err) { await reply('❌ Failed to save media.'); }
+            } else {
+                await reply('❌ The replied message is not a media file.');
+            }
         }
         else if (command === 'viewonce' || command === 'vo') {
             const action = args[0]?.toLowerCase();
@@ -184,22 +203,15 @@ export default async function messageHandler(sock, m, store, userId) {
         else if (command === 'vv' || command === 'vvp') {
             const isQuoted = !!msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
             if (!isQuoted) return reply(`❌ Reply to a view-once message.`);
-            
             const quotedMsg = msg.message.extendedTextMessage.contextInfo.quotedMessage;
-            let unwrappedQuoted = quotedMsg.viewOnceMessageV2?.message || 
-                                quotedMsg.viewOnceMessageV2Extension?.message ||
-                                quotedMsg.viewOnceMessage?.message ||
-                                quotedMsg;
-
+            let unwrappedQuoted = quotedMsg.viewOnceMessageV2?.message || quotedMsg.viewOnceMessageV2Extension?.message || quotedMsg.viewOnceMessage?.message || quotedMsg;
             const qType = getContentType(unwrappedQuoted);
             if (!unwrappedQuoted[qType]?.viewOnce) return reply('❌ Not a view-once message.');
-
             try {
                 let mediaType = ''; let mediaMessage = null;
                 if (qType === 'imageMessage') { mediaType = 'image'; mediaMessage = unwrappedQuoted.imageMessage; }
                 else if (qType === 'videoMessage') { mediaType = 'video'; mediaMessage = unwrappedQuoted.videoMessage; }
                 else if (qType === 'audioMessage') { mediaType = 'audio'; mediaMessage = unwrappedQuoted.audioMessage; }
-                
                 if (mediaType && mediaMessage) {
                     if (command === 'vv') await reply('⏳ Retrieving...');
                     const stream = await downloadContentFromMessage(mediaMessage, mediaType);
