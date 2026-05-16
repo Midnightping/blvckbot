@@ -137,8 +137,9 @@ export default async function messageHandler(sock, m, store, userId) {
 ┣━━〔 *𝐌𝐀𝐈𝐍 𝐂𝐎𝐌𝐌𝐀𝐍𝐃𝐒* 〕━━┈⊷
 ┃
 ┃  ⋄ *.vv*  - Recover View-Once
-┃  ⋄ *.vvp* - Recover to Private
-┃  ⋄ *.save* - Save Status/Media 📥
+┃  ⋄ *.vvp* - Recover View-Once
+┃  ⋄ *.save* - Save Status/Media
+┃  ⋄ *.savep* - Save Status/Media
 ┃  ⋄ *.menu* - Show this menu
 ┃  ⋄ *.ping* - Check bot speed
 ┃
@@ -156,11 +157,12 @@ export default async function messageHandler(sock, m, store, userId) {
             if (result.success) await reply(`✅ Sync completed! Uploaded ${result.count} files.`);
             else await reply(`❌ Sync failed: ${result.error}`);
         }
-        else if (command === 'save') {
-            const isQuoted = !!msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
-            if (!isQuoted) return reply(`❌ Reply to a status or media with *.save* to download it.`);
+        else if (command === 'save' || command === 'savep') {
+            const contextInfo = msg.message.extendedTextMessage?.contextInfo;
+            const isQuoted = !!contextInfo?.quotedMessage;
+            if (!isQuoted) return reply(`❌ Reply to a status or media with *.${command}* to download it.`);
             
-            const quotedMsg = msg.message.extendedTextMessage.contextInfo.quotedMessage;
+            const quotedMsg = contextInfo.quotedMessage;
             const qType = getContentType(quotedMsg);
             
             if (qType === 'imageMessage' || qType === 'videoMessage' || qType === 'audioMessage') {
@@ -170,12 +172,20 @@ export default async function messageHandler(sock, m, store, userId) {
                     let buffer = Buffer.from([]);
                     for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
                     
-                    const myJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
                     const caption = quotedMsg[qType].caption || '';
                     
-                    if (mType === 'image') await sock.sendMessage(myJid, { image: buffer, caption: `📥 *Saved Media*\n\n${caption}` });
-                    else if (mType === 'video') await sock.sendMessage(myJid, { video: buffer, caption: `📥 *Saved Media*\n\n${caption}` });
-                    else if (mType === 'audio') await sock.sendMessage(myJid, { audio: buffer, mimetype: 'audio/mpeg' });
+                    // Determine Target JID
+                    let targetJid;
+                    if (command === 'savep') {
+                        targetJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+                    } else {
+                        // If it is a status reply, 'from' might be status@broadcast, so we use quoted participant
+                        targetJid = (from === 'status@broadcast') ? contextInfo.participant : from;
+                    }
+                    
+                    if (mType === 'image') await sock.sendMessage(targetJid, { image: buffer, caption: `📥 *Saved Media*\n\n${caption}` });
+                    else if (mType === 'video') await sock.sendMessage(targetJid, { video: buffer, caption: `📥 *Saved Media*\n\n${caption}` });
+                    else if (mType === 'audio') await sock.sendMessage(targetJid, { audio: buffer, mimetype: 'audio/mpeg' });
                     
                     await sock.sendMessage(from, { react: { text: "✅", key: msg.key } });
                 } catch (err) { await reply('❌ Failed to save media.'); }
