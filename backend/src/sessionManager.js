@@ -50,12 +50,12 @@ export const startPairing = async (userId, phoneNumber, io) => {
 
     const sock = makeWASocket({
         version,
-        logger: pino({ level: 'silent' }),
+        logger: pino({ level: 'info' }), // Increased log level for better diagnosis
         auth: state,
         msgRetryCounterCache,
         generateHighQualityLinkPreview: true,
         printQRInTerminal: false,
-        browser: ['BlvckBot', 'Chrome', '1.0.0']
+        browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
 
     sessions.set(safeUserId, sock);
@@ -64,24 +64,31 @@ export const startPairing = async (userId, phoneNumber, io) => {
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
+        console.log(`[SESSION] Connection update for ${safeUserId}: ${connection}`);
 
         if (connection === 'open') {
+            console.log(`[SESSION] ${safeUserId} connected successfully!`);
             emitToUser(io, safeUserId, 'session-status', { status: 'connected' });
         }
 
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
+            const reason = lastDisconnect?.error?.message;
+            console.log(`[SESSION] ${safeUserId} connection closed. Status: ${statusCode}, Reason: ${reason}`);
+            
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
             emitToUser(io, safeUserId, 'session-status', {
                 status: shouldReconnect ? 'reconnecting' : 'disconnected',
-                reason: lastDisconnect?.error?.message
+                reason: reason
             });
 
-            sessions.delete(safeUserId);
-
             if (shouldReconnect) {
-                setTimeout(() => startPairing(safeUserId, phoneNumber, io).catch(console.error), 3000);
+                console.log(`[SESSION] Reconnecting ${safeUserId}...`);
+                // Don't delete from sessions map if we're reconnecting
+                setTimeout(() => startPairing(safeUserId, phoneNumber, io).catch(console.error), 5000);
+            } else {
+                sessions.delete(safeUserId);
             }
         }
     });
