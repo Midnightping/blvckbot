@@ -56,7 +56,8 @@ export const startPairing = async (userId, phoneNumber, io, method = 'code') => 
         msgRetryCounterCache,
         generateHighQualityLinkPreview: true,
         printQRInTerminal: false,
-        browser: ["Ubuntu", "Chrome", "20.0.04"]
+        browser: ["macOS", "Chrome", "121.0.6167.160"],
+        markOnline: true
     });
 
     sessions.set(safeUserId, sock);
