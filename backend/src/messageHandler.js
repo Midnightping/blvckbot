@@ -18,8 +18,13 @@ const getUserStorage = (userId) => {
     const deletedCacheDir = path.join(userDir, 'deleted_cache');
     if (!fs.existsSync(viewOnceDir)) fs.mkdirSync(viewOnceDir, { recursive: true });
     if (!fs.existsSync(deletedCacheDir)) fs.mkdirSync(deletedCacheDir, { recursive: true });
-    let state = { autoViewStatus: false };
-    if (fs.existsSync(statePath)) { try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch (e) {} }
+    let state = { autoViewStatus: false, isPrivate: true };
+    if (fs.existsSync(statePath)) { 
+        try { 
+            const savedState = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+            state = { ...state, ...savedState };
+        } catch (e) {} 
+    }
     let index = {};
     if (fs.existsSync(viewOnceIndexPath)) { try { index = JSON.parse(fs.readFileSync(viewOnceIndexPath, 'utf8')); } catch (e) {} }
     return { state, index, statePath, viewOnceDir, viewOnceIndexPath, deletedCacheDir,
@@ -42,6 +47,19 @@ export default async function messageHandler(sock, m, store, userId) {
         const storage = getUserStorage(userId);
         const { state, index, viewOnceDir, deletedCacheDir } = storage;
         const from = msg.key.remoteJid;
+
+        // --- PRIVATE MODE CHECK ---
+        // If private mode is ON, only allow commands from the owner (fromMe)
+        const isCommand = msg.message && (
+            msg.message.conversation?.startsWith('.') || 
+            msg.message.extendedTextMessage?.text?.startsWith('.') ||
+            msg.message.imageMessage?.caption?.startsWith('.') ||
+            msg.message.videoMessage?.caption?.startsWith('.')
+        );
+
+        if (isCommand && state.isPrivate && !msg.key.fromMe) {
+            return; // Ignore commands from others in private mode
+        }
 
         // --- ANTI-DELETE: Detect protocol message (delete event) ---
         if (msg.message?.protocolMessage?.type === 0) {
@@ -196,6 +214,22 @@ export default async function messageHandler(sock, m, store, userId) {
             else if (toggle === 'off') { state.autoViewStatus = false; storage.saveState(state); await reply('❌ Auto Status Viewer disabled.'); }
             else { await reply(`Auto Viewer is: ${state.autoViewStatus ? 'ON' : 'OFF'}\nUse .autoview on/off`); }
         }
+        else if (command === 'private') {
+            const toggle = args[0]?.toLowerCase();
+            if (toggle === 'on') { 
+                state.isPrivate = true; 
+                storage.saveState(state); 
+                await reply('🔒 *Private Mode Enabled*\nOnly you can trigger bot commands now.'); 
+            }
+            else if (toggle === 'off') { 
+                state.isPrivate = false; 
+                storage.saveState(state); 
+                await reply('🔓 *Private Mode Disabled*\nAnyone in your chats/groups can trigger bot commands.'); 
+            }
+            else { 
+                await reply(`Bot is currently in *${state.isPrivate ? 'PRIVATE' : 'PUBLIC'}* mode.\nUse .private on/off to toggle.`); 
+            }
+        }
         else if (command === 'menu') {
             const menu = `╭━━━〔 *𝐁𝐋𝐕𝐂𝐊-𝐁𝐎𝐓* 〕━━━┈⊷
 ┃
@@ -216,6 +250,7 @@ export default async function messageHandler(sock, m, store, userId) {
 ┣━━〔 *𝐒𝐄𝐓𝐓𝐈𝐍𝐆𝐒* 〕━━┈⊷
 ┃
 ┃  ⋄ *.autoview <on/off>*
+┃  ⋄ *.private <on/off>* - ${state.isPrivate ? 'Locked 🔒' : 'Public 🔓'}
 ┃  ⋄ *.viewonce* - List saved media
 ┃
 ╰━━━━━━━━━━━━━━━┈⊷
