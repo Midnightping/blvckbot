@@ -1,11 +1,17 @@
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 import ffmpeg from 'fluent-ffmpeg';
+import ffmpegStatic from 'ffmpeg-static';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Use static ffmpeg binary if available, otherwise fallback to system
+if (ffmpegStatic) {
+    ffmpeg.setFfmpegPath(ffmpegStatic);
+}
 
 export default async (sock, from, msg, reply) => {
     try {
