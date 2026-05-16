@@ -56,8 +56,12 @@ export const startPairing = async (userId, phoneNumber, io, method = 'code') => 
         msgRetryCounterCache,
         generateHighQualityLinkPreview: true,
         printQRInTerminal: false,
-        browser: ["macOS", "Chrome", "121.0.6167.160"],
-        markOnline: true
+        browser: ["BlvckBot", "Chrome", "20.0.04"],
+        syncFullHistory: false,
+        markOnline: true,
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 0,
+        keepAliveIntervalMs: 10000
     });
 
     sessions.set(safeUserId, sock);
@@ -88,6 +92,14 @@ export const startPairing = async (userId, phoneNumber, io, method = 'code') => 
             const reason = lastDisconnect?.error?.message;
             console.log(`[SESSION] ${safeUserId} connection closed. Status: ${statusCode}, Reason: ${reason}`);
             
+            // 515 is a normal "restart required" after pairing
+            if (statusCode === 515) {
+                console.log(`[SESSION] ${safeUserId} restarting connection (515)...`);
+                // Just restart without wiping everything
+                setTimeout(() => startPairing(safeUserId, phoneNumber, io, method).catch(console.error), 2000);
+                return;
+            }
+
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
             emitToUser(io, safeUserId, 'session-status', {
