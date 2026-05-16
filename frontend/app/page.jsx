@@ -10,6 +10,8 @@ export default function Home() {
   const [name, setName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [pairingCode, setPairingCode] = useState('');
+  const [qrCode, setQrCode] = useState('');
+  const [method, setMethod] = useState('code'); // 'code' or 'qr'
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
 
@@ -28,10 +30,18 @@ export default function Home() {
       setMessage('Pairing code generated. Enter it in WhatsApp to link your device.');
     });
 
+    socket.on('qr-code', ({ qr }) => {
+      setQrCode(qr);
+      setStatus('qr-ready');
+      setMessage('Scan the QR code in WhatsApp (Linked Devices) to link your device.');
+    });
+
     socket.on('session-status', ({ status: nextStatus }) => {
       setStatus(nextStatus);
       if (nextStatus === 'connected') {
         setMessage('Your WhatsApp is connected to BlvckLink.');
+        setPairingCode('');
+        setQrCode('');
       }
     });
 
@@ -39,20 +49,26 @@ export default function Home() {
   }, [userId]);
 
   const startPairing = async () => {
-    if (!name.trim() || !phoneNumber.trim()) {
-      setMessage('Enter your name and phone number first.');
+    if (!name.trim()) {
+      setMessage('Enter your name first.');
+      return;
+    }
+
+    if (method === 'code' && !phoneNumber.trim()) {
+      setMessage('Enter your phone number for pairing code.');
       return;
     }
 
     setStatus('loading');
     setPairingCode('');
-    setMessage('Requesting pairing code...');
+    setQrCode('');
+    setMessage(method === 'code' ? 'Requesting pairing code...' : 'Generating QR code...');
 
     try {
       const response = await fetch(`${API_URL}/api/pair/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, phoneNumber }),
+        body: JSON.stringify({ userId, phoneNumber, method }),
       });
 
       const data = await response.json();
@@ -61,9 +77,14 @@ export default function Home() {
         throw new Error(data.error || 'Failed to start pairing');
       }
 
-      setPairingCode(data.code);
-      setStatus('code-ready');
-      setMessage('Pairing code generated. Enter it in WhatsApp to link your device.');
+      if (method === 'code') {
+        setPairingCode(data.code);
+        setStatus('code-ready');
+        setMessage('Pairing code generated. Enter it in WhatsApp to link your device.');
+      } else {
+        setStatus('qr-waiting');
+        setMessage('Waiting for QR code from WhatsApp...');
+      }
     } catch (error) {
       setStatus('error');
       setMessage(error.message);
@@ -111,6 +132,21 @@ export default function Home() {
           </div>
 
           <div className="space-y-4">
+            <div className="flex gap-2 p-1 bg-black/30 rounded-2xl border border-white/10">
+              <button
+                onClick={() => setMethod('code')}
+                className={`flex-1 py-2 rounded-xl text-sm font-medium transition ${method === 'code' ? 'bg-violet-500 text-white' : 'text-white/50 hover:text-white'}`}
+              >
+                Pairing Code
+              </button>
+              <button
+                onClick={() => setMethod('qr')}
+                className={`flex-1 py-2 rounded-xl text-sm font-medium transition ${method === 'qr' ? 'bg-violet-500 text-white' : 'text-white/50 hover:text-white'}`}
+              >
+                QR Code
+              </button>
+            </div>
+
             <label className="block">
               <span className="mb-2 block text-sm font-medium text-white/70">Display name</span>
               <input
@@ -121,18 +157,20 @@ export default function Home() {
               />
             </label>
 
-            <label className="block">
-              <span className="mb-2 block text-sm font-medium text-white/70">Phone number with country code</span>
-              <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/30 px-4 py-4 transition focus-within:border-violet-300/70">
-                <Smartphone className="h-5 w-5 text-white/45" />
-                <input
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                  placeholder="2348012345678"
-                  className="w-full bg-transparent outline-none"
-                />
-              </div>
-            </label>
+            {method === 'code' && (
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-white/70">Phone number with country code</span>
+                <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/30 px-4 py-4 transition focus-within:border-violet-300/70">
+                  <Smartphone className="h-5 w-5 text-white/45" />
+                  <input
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    placeholder="2348012345678"
+                    className="w-full bg-transparent outline-none"
+                  />
+                </div>
+              </label>
+            )}
 
             <button
               onClick={startPairing}
@@ -140,7 +178,7 @@ export default function Home() {
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-500 to-fuchsia-500 px-5 py-4 font-bold text-white shadow-lg shadow-violet-950/40 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-70"
             >
               {status === 'loading' ? <Loader2 className="h-5 w-5 animate-spin" /> : <Link2 className="h-5 w-5" />}
-              Generate Pairing Code
+              {method === 'code' ? 'Generate Pairing Code' : 'Generate QR Code'}
             </button>
           </div>
 
@@ -155,6 +193,16 @@ export default function Home() {
               </div>
               <p className="mt-4 text-sm leading-6 text-white/65">
                 Open WhatsApp, go to Linked Devices, choose Link with phone number, then enter this code.
+              </p>
+            </div>
+          )}
+
+          {qrCode && (
+            <div className="mt-6 rounded-3xl border border-violet-300/20 bg-white p-5 flex flex-col items-center">
+              <p className="text-sm text-black/60 mb-4 font-medium">Scan with WhatsApp</p>
+              <img src={qrCode} alt="WhatsApp QR Code" className="w-64 h-64" />
+              <p className="mt-4 text-xs text-black/50 text-center leading-5">
+                Open WhatsApp &gt; Linked Devices &gt; Link a Device
               </p>
             </div>
           )}

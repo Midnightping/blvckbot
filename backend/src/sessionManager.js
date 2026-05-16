@@ -3,6 +3,7 @@ import pino from 'pino';
 import NodeCache from 'node-cache';
 import fs from 'fs';
 import path from 'path';
+import QRCode from 'qrcode';
 import messageHandler from './messageHandler.js';
 
 const sessions = new Map();
@@ -19,11 +20,11 @@ const emitToUser = (io, userId, event, payload) => {
     io.to(`user:${userId}`).emit(event, payload);
 };
 
-export const startPairing = async (userId, phoneNumber, io) => {
+export const startPairing = async (userId, phoneNumber, io, method = 'code') => {
     const safeUserId = sanitizeUserId(userId);
     const sessionPath = path.join(sessionsRoot, safeUserId);
 
-    console.log(`[SESSION] Starting pairing for ${safeUserId}`);
+    console.log(`[SESSION] Starting ${method} pairing for ${safeUserId}`);
 
     // End existing in-memory session
     if (sessions.has(safeUserId)) {
@@ -50,7 +51,7 @@ export const startPairing = async (userId, phoneNumber, io) => {
 
     const sock = makeWASocket({
         version,
-        logger: pino({ level: 'info' }), // Increased log level for better diagnosis
+        logger: pino({ level: 'info' }),
         auth: state,
         msgRetryCounterCache,
         generateHighQualityLinkPreview: true,
@@ -62,8 +63,18 @@ export const startPairing = async (userId, phoneNumber, io) => {
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+        
+        if (qr && method === 'qr') {
+            try {
+                const qrBase64 = await QRCode.toDataURL(qr);
+                emitToUser(io, safeUserId, 'qr-code', { qr: qrBase64 });
+            } catch (err) {
+                console.error('[SESSION] QR generation failed:', err);
+            }
+        }
+
         console.log(`[SESSION] Connection update for ${safeUserId}: ${connection}`);
 
         if (connection === 'open') {
@@ -85,8 +96,7 @@ export const startPairing = async (userId, phoneNumber, io) => {
 
             if (shouldReconnect) {
                 console.log(`[SESSION] Reconnecting ${safeUserId}...`);
-                // Don't delete from sessions map if we're reconnecting
-                setTimeout(() => startPairing(safeUserId, phoneNumber, io).catch(console.error), 5000);
+                setTimeout(() => startPairing(safeUserId, phoneNumber, io, method).catch(console.error), 5000);
             } else {
                 sessions.delete(safeUserId);
             }
@@ -100,20 +110,33 @@ export const startPairing = async (userId, phoneNumber, io) => {
         await messageHandler(sock, m, messageStore, safeUserId);
     });
 
-    const normalizedPhone = String(phoneNumber).replace(/\D/g, '');
-    
-    // Small delay to ensure socket is ready
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    console.log(`[SESSION] Requesting pairing code for ${normalizedPhone}`);
-    const pairingCode = await sock.requestPairingCode(normalizedPhone);
-
-    emitToUser(io, safeUserId, 'pairing-code', { code: pairingCode, isLatest });
+    if (method === 'code' && phoneNumber) {
+        const normalizedPhone = String(phoneNumber).replace(/\D/g, '');
+        
+        // Small delay to ensure socket is ready
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        console.log(`[SESSION] Requesting pairing code for ${normalizedPhone}`);
+        try {
+            const pairingCode = await sock.requestPairingCode(normalizedPhone);
+            emitToUser(io, safeUserId, 'pairing-code', { code: pairingCode, isLatest });
+            
+            return {
+                userId: safeUserId,
+                code: pairingCode,
+                status: 'pairing_code_generated',
+                waVersion: version.join('.'),
+                isLatest
+            };
+        } catch (err) {
+            console.error('[SESSION] Pairing code request failed:', err);
+            throw err;
+        }
+    }
 
     return {
         userId: safeUserId,
-        code: pairingCode,
-        status: 'pairing_code_generated',
+        status: 'qr_ready',
         waVersion: version.join('.'),
         isLatest
     };

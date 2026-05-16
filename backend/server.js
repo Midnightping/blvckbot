@@ -27,13 +27,17 @@ app.get('/', (req, res) => {
 
 app.post('/api/pair/start', async (req, res) => {
     try {
-        const { userId, phoneNumber } = req.body;
+        const { userId, phoneNumber, method } = req.body;
 
-        if (!userId || !phoneNumber) {
-            return res.status(400).json({ error: 'userId and phoneNumber are required' });
+        if (!userId) {
+            return res.status(400).json({ error: 'userId is required' });
         }
 
-        const result = await startPairing(userId, phoneNumber, io);
+        if (method === 'code' && !phoneNumber) {
+            return res.status(400).json({ error: 'phoneNumber is required for pairing code' });
+        }
+
+        const result = await startPairing(userId, phoneNumber, io, method || 'code');
         res.json(result);
     } catch (error) {
         console.error('[API] Pairing failed:', error);
