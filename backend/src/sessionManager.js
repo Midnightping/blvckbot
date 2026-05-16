@@ -8,7 +8,9 @@ import messageHandler from './messageHandler.js';
 
 const sessions = new Map();
 const messageStores = new Map();
-const sessionsRoot = path.join(process.cwd(), 'sessions');
+// Check for Railway volume mount or fallback to local sessions
+const railwayVolume = '/data/sessions';
+const sessionsRoot = fs.existsSync('/data') ? railwayVolume : path.join(process.cwd(), 'sessions');
 
 if (!fs.existsSync(sessionsRoot)) {
     fs.mkdirSync(sessionsRoot, { recursive: true });
