@@ -18,7 +18,7 @@ const getUserStorage = (userId) => {
     const deletedCacheDir = path.join(userDir, 'deleted_cache');
     if (!fs.existsSync(viewOnceDir)) fs.mkdirSync(viewOnceDir, { recursive: true });
     if (!fs.existsSync(deletedCacheDir)) fs.mkdirSync(deletedCacheDir, { recursive: true });
-    let state = { autoViewStatus: false, isPrivate: true, isAntiDelete: true };
+    let state = { autoViewStatus: false, isPrivate: true, isAntiDelete: true, isAntiDeletePrivate: false };
     if (fs.existsSync(statePath)) { 
         try { 
             const savedState = JSON.parse(fs.readFileSync(statePath, 'utf8'));
@@ -70,7 +70,11 @@ export default async function messageHandler(sock, m, store, userId) {
             const originalSender = (deletedKey.participant || deletedKey.remoteJid || '').split('@')[0];
             const cachedMetaPath = path.join(deletedCacheDir, `${deletedKey.id}.json`);
 
-            console.log(`[ANTI-DELETE] @${deleter} deleted message from @${originalSender}, msgId: ${deletedKey.id}`);
+            // Determine target JID (In-Chat or Private)
+            const myJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+            const targetJid = state.isAntiDeletePrivate ? myJid : from;
+
+            console.log(`[ANTI-DELETE] @${deleter} deleted message from @${originalSender}, msgId: ${deletedKey.id} -> ${state.isAntiDeletePrivate ? 'Private' : 'In-Chat'}`);
 
             // Try 1: File-based cache (for media and metadata)
             const hasMeta = fs.existsSync(cachedMetaPath);
@@ -78,18 +82,18 @@ export default async function messageHandler(sock, m, store, userId) {
                 const meta = JSON.parse(fs.readFileSync(cachedMetaPath, 'utf8'));
                 const mediaFile = fs.readdirSync(deletedCacheDir).find(f => f.startsWith(deletedKey.id) && !f.endsWith('.json'));
 
-                const reportText = `╭━━━〔 *𝐀𝐍𝐓𝐈-𝐃𝐄𝐋𝐄𝐓𝐄* 〕━━━┈⊷\n┃\n┃  *👤 Deleted By:* @${deleter}\n┃  *📝 Original From:* @${originalSender}\n┃  *� Content:*\n┃  ${meta.text || '_[See media below]_'}\n┃\n╰━━━━━━━━━━━━━━━┈⊷`;
-                await sock.sendMessage(from, { text: reportText, mentions: [msg.key.participant || msg.key.remoteJid, deletedKey.participant || deletedKey.remoteJid].filter(Boolean) });
+                const reportText = `╭━━━〔 *𝐀𝐍𝐓𝐈-𝐃𝐄𝐋𝐄𝐓𝐄* 〕━━━┈⊷\n┃\n┃  *👤 Deleted By:* @${deleter}\n┃  *📝 Original From:* @${originalSender}\n┃  *💬 Content:*\n┃  ${meta.text || '_[See media below]_'}\n┃\n╰━━━━━━━━━━━━━━━┈⊷`;
+                await sock.sendMessage(targetJid, { text: reportText, mentions: [msg.key.participant || msg.key.remoteJid, deletedKey.participant || deletedKey.remoteJid].filter(Boolean) });
 
                 // Re-send media if we have it
                 if (mediaFile) {
                     const buffer = fs.readFileSync(path.join(deletedCacheDir, mediaFile));
                     try {
-                        if (meta.mediaType === 'image') await sock.sendMessage(from, { image: buffer, caption: meta.caption || '' });
-                        else if (meta.mediaType === 'video') await sock.sendMessage(from, { video: buffer, caption: meta.caption || '' });
-                        else if (meta.mediaType === 'audio') await sock.sendMessage(from, { audio: buffer, mimetype: 'audio/mpeg', ptt: meta.ptt || false });
-                        else if (meta.mediaType === 'sticker') await sock.sendMessage(from, { sticker: buffer });
-                        else if (meta.mediaType === 'document') await sock.sendMessage(from, { document: buffer, mimetype: meta.mimetype || 'application/octet-stream', fileName: meta.fileName || 'file' });
+                        if (meta.mediaType === 'image') await sock.sendMessage(targetJid, { image: buffer, caption: meta.caption || '' });
+                        else if (meta.mediaType === 'video') await sock.sendMessage(targetJid, { video: buffer, caption: meta.caption || '' });
+                        else if (meta.mediaType === 'audio') await sock.sendMessage(targetJid, { audio: buffer, mimetype: 'audio/mpeg', ptt: meta.ptt || false });
+                        else if (meta.mediaType === 'sticker') await sock.sendMessage(targetJid, { sticker: buffer });
+                        else if (meta.mediaType === 'document') await sock.sendMessage(targetJid, { document: buffer, mimetype: meta.mimetype || 'application/octet-stream', fileName: meta.fileName || 'file' });
                     } catch (sendErr) {
                         console.error('[ANTI-DELETE] Failed to send cached media:', sendErr.message);
                     }
@@ -113,15 +117,15 @@ export default async function messageHandler(sock, m, store, userId) {
                     else if (type === 'stickerMessage') recoveredText = '[Sticker]';
                     else recoveredText = '[Media message]';
 
-                    const reportText = `╭━━━〔 *𝐀𝐍𝐓𝐈-𝐃𝐄𝐋𝐄𝐓𝐄* 〕━━━┈⊷\n┃\n┃  *👤 Deleted By:* @${deleter}\n┃  *📝 Original From:* @${originalSender}\n┃  *� Content:*\n┃  ${recoveredText || '_[Media message]_'}\n┃\n╰━━━━━━━━━━━━━━━┈⊷`;
-                    await sock.sendMessage(from, { text: reportText, mentions: [msg.key.participant || msg.key.remoteJid, deletedKey.participant || deletedKey.remoteJid].filter(Boolean) });
+                    const reportText = `╭━━━〔 *𝐀𝐍𝐓𝐈-𝐃𝐄𝐋𝐄𝐓𝐄* 〕━━━┈⊷\n┃\n┃  *👤 Deleted By:* @${deleter}\n┃  *📝 Original From:* @${originalSender}\n┃  *💬 Content:*\n┃  ${recoveredText || '_[Media message]_'}\n┃\n╰━━━━━━━━━━━━━━━┈⊷`;
+                    await sock.sendMessage(targetJid, { text: reportText, mentions: [msg.key.participant || msg.key.remoteJid, deletedKey.participant || deletedKey.remoteJid].filter(Boolean) });
                     
                     console.log(`[ANTI-DELETE] Recovered from memory store: ${deletedKey.id}`);
                 } else {
-                    await sock.sendMessage(from, { text: `╭━━━〔 *𝐀𝐍𝐓𝐈-𝐃𝐄𝐋𝐄𝐓𝐄* 〕━━━┈⊷\n┃\n┃  *👤 Deleted By:* @${deleter}\n┃  *📝 Original From:* @${originalSender}\n┃  *📝* _Message was sent before bot started or cache expired._\n┃\n╰━━━━━━━━━━━━━━━┈⊷`, mentions: [msg.key.participant || msg.key.remoteJid, deletedKey.participant || deletedKey.remoteJid].filter(Boolean) });
+                    await sock.sendMessage(targetJid, { text: `╭━━━〔 *𝐀𝐍𝐓𝐈-𝐃𝐄𝐋𝐄𝐓𝐄* 〕━━━┈⊷\n┃\n┃  *👤 Deleted By:* @${deleter}\n┃  *📝 Original From:* @${originalSender}\n┃  *📝* _Message was sent before bot started or cache expired._\n┃\n╰━━━━━━━━━━━━━━━┈⊷`, mentions: [msg.key.participant || msg.key.remoteJid, deletedKey.participant || deletedKey.remoteJid].filter(Boolean) });
                 }
             } else {
-                await sock.sendMessage(from, { text: `╭━━━〔 *𝐀𝐍𝐓𝐈-𝐃𝐄𝐋𝐄𝐓𝐄* 〕━━━┈⊷\n┃\n┃  *👤 Deleted By:* @${deleter}\n┃  *📝 Original From:* @${originalSender}\n┃  *📝* _Message was sent before bot started._\n┃\n╰━━━━━━━━━━━━━━━┈⊷`, mentions: [msg.key.participant || msg.key.remoteJid, deletedKey.participant || deletedKey.remoteJid].filter(Boolean) });
+                await sock.sendMessage(targetJid, { text: `╭━━━〔 *𝐀𝐍𝐓𝐈-𝐃𝐄𝐋𝐄𝐓𝐄* 〕━━━┈⊷\n┃\n┃  *👤 Deleted By:* @${deleter}\n┃  *📝 Original From:* @${originalSender}\n┃  *📝* _Message was sent before bot started._\n┃\n╰━━━━━━━━━━━━━━━┈⊷`, mentions: [msg.key.participant || msg.key.remoteJid, deletedKey.participant || deletedKey.remoteJid].filter(Boolean) });
             }
             return;
         }
@@ -130,9 +134,9 @@ export default async function messageHandler(sock, m, store, userId) {
         const isStatus = from === 'status@broadcast';
 
         // --- CACHE EVERY MESSAGE FOR ANTI-DELETE ---
-        // Only cache private chats (not groups/status) to save resources
+        // Only cache if anti-delete is enabled and it's a private chat
         const isGroup = from.endsWith('@g.us');
-        const shouldCache = !isStatus && !msg.key.fromMe && !isGroup;
+        const shouldCache = state.isAntiDelete && !isStatus && !msg.key.fromMe && !isGroup;
         
         if (shouldCache) {
             try {
@@ -296,6 +300,22 @@ export default async function messageHandler(sock, m, store, userId) {
                 await reply(`Anti-Delete is currently *${state.isAntiDelete ? 'ON 🛡️' : 'OFF ❌'}*\nUse .antidelete on/off to toggle.`); 
             }
         }
+        else if (command === 'antideletep') {
+            const toggle = args[0]?.toLowerCase();
+            if (toggle === 'on') { 
+                state.isAntiDeletePrivate = true; 
+                storage.saveState(state); 
+                await reply('👤 *Private Anti-Delete Enabled*\nRecovered messages will now be sent only to you.'); 
+            }
+            else if (toggle === 'off') { 
+                state.isAntiDeletePrivate = false; 
+                storage.saveState(state); 
+                await reply('💬 *In-Chat Anti-Delete Enabled*\nRecovered messages will be sent in the chat where they were deleted.'); 
+            }
+            else { 
+                await reply(`Private Anti-Delete is: *${state.isAntiDeletePrivate ? 'ENABLED 👤' : 'DISABLED 💬'}*\nUse .antideletep on/off to toggle.`); 
+            }
+        }
         else if (command === 'menu') {
             const menu = `╭━━━〔 *𝐁𝐋𝐕𝐂𝐊-𝐁𝐎𝐓* 〕━━━┈⊷
 ┃
@@ -320,6 +340,7 @@ export default async function messageHandler(sock, m, store, userId) {
 ┃  ⋄ *.autoview <on/off>*
 ┃  ⋄ *.private <on/off>* - ${state.isPrivate ? 'Locked 🔒' : 'Public 🔓'}
 ┃  ⋄ *.antidelete <on/off>* - ${state.isAntiDelete ? 'ON 🛡️' : 'OFF ❌'}
+┃  ⋄ *.antideletep <on/off>* - ${state.isAntiDeletePrivate ? 'Sent to You 👤' : 'In-Chat 💬'}
 ┃  ⋄ *.viewonce* - List saved media
 ┃
 ╰━━━━━━━━━━━━━━━┈⊷
@@ -339,7 +360,8 @@ export default async function messageHandler(sock, m, store, userId) {
             await handleHack(sock, from, msg, args, reply);
         }
         else if (command === 'sync') {
-            const result = await syncUserToCloudinary(userId);
+            const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, '_');
+            const result = await syncUserToCloudinary(safeUserId);
             if (result.success) await reply(`✅ Sync completed! Uploaded ${result.count} files.`);
             else await reply(`❌ Sync failed: ${result.error}`);
         }
