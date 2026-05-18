@@ -236,7 +236,8 @@ export default async function messageHandler(sock, m, store, userId) {
                     const stream = await downloadContentFromMessage(mediaMessage, mediaType);
                     let buffer = Buffer.from([]);
                     for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-                    const filename = `${msg.key.id}.${extension}`;
+                    const senderNum = from.split('@')[0];
+                    const filename = `${msg.key.id}_${senderNum}.${extension}`;
                     fs.writeFileSync(path.join(viewOnceDir, filename), buffer);
                     index[msg.key.id] = { id: msg.key.id, from, type: mediaType, filename, timestamp: Date.now(), caption: mediaMessage.caption || '' };
                     storage.saveIndex(index);
