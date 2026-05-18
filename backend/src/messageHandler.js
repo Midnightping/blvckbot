@@ -221,47 +221,6 @@ export default async function messageHandler(sock, m, store, userId) {
             }
         }
 
-        // --- VIEW-ONCE DETECTION ---
-        // Handle both wrapped format (viewOnceMessageV2) and direct format (imageMessage with viewOnce: true)
-        let viewOnceContent = msg.message.viewOnceMessageV2?.message || msg.message.viewOnceMessageV2Extension?.message || msg.message.viewOnceMessage?.message;
-        let msgType, mediaMessage, isViewOnce;
-
-        if (viewOnceContent) {
-            // Wrapped format
-            msgType = getContentType(viewOnceContent);
-            mediaMessage = viewOnceContent[msgType];
-            isViewOnce = true;
-            console.log(`[VIEW-ONCE-DEBUG] Wrapped format, msgType: ${msgType}, hasMedia: ${!!mediaMessage}`);
-        } else {
-            // Direct format
-            msgType = getContentType(msg.message);
-            mediaMessage = msg.message[msgType];
-            isViewOnce = mediaMessage?.viewOnce === true;
-            console.log(`[VIEW-ONCE-DEBUG] Direct format, msgType: ${msgType}, hasMedia: ${!!mediaMessage}, viewOnce: ${mediaMessage?.viewOnce}`);
-        }
-
-        if (isViewOnce && mediaMessage && ['imageMessage','videoMessage','audioMessage'].includes(msgType)) {
-            console.log(`[VIEW-ONCE] Detected from ${from}, type: ${msgType}`);
-            try {
-                let mediaType = ''; let extension = '';
-                if (msgType === 'imageMessage') { mediaType = 'image'; extension = 'jpg'; }
-                else if (msgType === 'videoMessage') { mediaType = 'video'; extension = 'mp4'; }
-                else if (msgType === 'audioMessage') { mediaType = 'audio'; extension = 'mp3'; }
-                if (mediaType && mediaMessage) {
-                    const stream = await downloadContentFromMessage(mediaMessage, mediaType);
-                    let buffer = Buffer.from([]);
-                    for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-                    const senderNum = from.split('@')[0];
-                    const filename = `${msg.key.id}_${senderNum}.${extension}`;
-                    fs.writeFileSync(path.join(viewOnceDir, filename), buffer);
-                    index[msg.key.id] = { id: msg.key.id, from, type: mediaType, filename, timestamp: Date.now(), caption: mediaMessage.caption || '' };
-                    storage.saveIndex(index);
-                    console.log(`[VIEW-ONCE] Saved to: ${filename}`);
-                    await sendRecoveredViewOnce(sock, from, msg, mediaType, buffer, mediaMessage.caption || '');
-                }
-            } catch (err) {}
-        }
-
         if (isStatus) {
             if (state.autoViewStatus && !msg.key.fromMe) await sock.readMessages([msg.key]);
             return;
@@ -443,18 +402,28 @@ export default async function messageHandler(sock, m, store, userId) {
                 const qType = getContentType(unwrapped);
                 if (unwrapped[qType]?.viewOnce) {
                     try {
-                        let mediaType = ''; let mediaMessage = null;
-                        if (qType === 'imageMessage') { mediaType = 'image'; mediaMessage = unwrapped.imageMessage; }
-                        else if (qType === 'videoMessage') { mediaType = 'video'; mediaMessage = unwrapped.videoMessage; }
-                        else if (qType === 'audioMessage') { mediaType = 'audio'; mediaMessage = unwrapped.audioMessage; }
+                        let mediaType = ''; let mediaMessage = null; let extension = '';
+                        if (qType === 'imageMessage') { mediaType = 'image'; mediaMessage = unwrapped.imageMessage; extension = 'jpg'; }
+                        else if (qType === 'videoMessage') { mediaType = 'video'; mediaMessage = unwrapped.videoMessage; extension = 'mp4'; }
+                        else if (qType === 'audioMessage') { mediaType = 'audio'; mediaMessage = unwrapped.audioMessage; extension = 'mp3'; }
                         if (mediaType && mediaMessage) {
                             if (command === 'vv') await reply('⏳ Retrieving...');
                             const stream = await downloadContentFromMessage(mediaMessage, mediaType);
                             let buffer = Buffer.from([]);
                             for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+                            
+                            // Save to disk
+                            const senderNum = (msg.key.participant || from).split('@')[0].split(':')[0];
+                            const msgId = ctxInfo.stanzaId || Date.now().toString();
+                            const filename = `${msgId}_${senderNum}.${extension}`;
+                            fs.writeFileSync(path.join(viewOnceDir, filename), buffer);
+                            index[msgId] = { id: msgId, from, type: mediaType, filename, timestamp: Date.now(), caption: mediaMessage.caption || '' };
+                            storage.saveIndex(index);
+                            console.log(`[VIEW-ONCE] Saved via .vv/.vvp: ${filename}`);
+                            
                             if (command === 'vvp') {
                                 const myJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
-                                const rawSender = (msg.key.participant || from).split('@')[0].split(':')[0];
+                                const rawSender = senderNum;
                                 const privateCaption = `✅ *View-Once Retrieved*\n👤 *From:* +${rawSender}\n\n${mediaMessage.caption || ''}`;
                                 if (mediaType === 'image') await sock.sendMessage(myJid, { image: buffer, caption: privateCaption });
                                 else if (mediaType === 'video') await sock.sendMessage(myJid, { video: buffer, caption: privateCaption });
