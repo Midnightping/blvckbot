@@ -224,8 +224,9 @@ export default async function messageHandler(sock, m, store, userId) {
         // --- VIEW-ONCE DETECTION ---
         const msgType = getContentType(msg.message);
         const directMedia = msg.message[msgType];
+        console.log(`[VIEW-ONCE-DEBUG] msgType: ${msgType}, hasDirectMedia: ${!!directMedia}, viewOnce: ${directMedia?.viewOnce}`);
         const isViewOnce = directMedia?.viewOnce === true;
-        
+
         if (isViewOnce && ['imageMessage','videoMessage','audioMessage'].includes(msgType)) {
             console.log(`[VIEW-ONCE] Detected from ${from}, type: ${msgType}`);
             try {
