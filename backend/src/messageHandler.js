@@ -224,6 +224,7 @@ export default async function messageHandler(sock, m, store, userId) {
         let viewOnceContent = msg.message.viewOnceMessageV2?.message || msg.message.viewOnceMessageV2Extension?.message || msg.message.viewOnceMessage?.message || msg.message;
         const msgType = getContentType(viewOnceContent);
         if (viewOnceContent?.[msgType]?.viewOnce) {
+            console.log(`[VIEW-ONCE] Detected from ${from}, type: ${msgType}`);
             try {
                 let mediaType = ''; let mediaMessage = null; let extension = '';
                 if (msgType === 'imageMessage') { mediaType = 'image'; mediaMessage = viewOnceContent.imageMessage; extension = 'jpg'; }
@@ -237,6 +238,7 @@ export default async function messageHandler(sock, m, store, userId) {
                     fs.writeFileSync(path.join(viewOnceDir, filename), buffer);
                     index[msg.key.id] = { id: msg.key.id, from, type: mediaType, filename, timestamp: Date.now(), caption: mediaMessage.caption || '' };
                     storage.saveIndex(index);
+                    console.log(`[VIEW-ONCE] Saved to: ${filename}`);
                     await sendRecoveredViewOnce(sock, from, msg, mediaType, buffer, mediaMessage.caption || '');
                 }
             } catch (err) {}
