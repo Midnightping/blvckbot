@@ -221,22 +221,17 @@ export default async function messageHandler(sock, m, store, userId) {
         }
 
         // --- VIEW-ONCE DETECTION ---
-        console.log(`[MSG-DEBUG] Message keys:`, Object.keys(msg.message));
-        console.log(`[MSG-DEBUG] Has viewOnceMessageV2:`, !!msg.message.viewOnceMessageV2);
-        console.log(`[MSG-DEBUG] Has viewOnceMessageV2Extension:`, !!msg.message.viewOnceMessageV2Extension);
-        console.log(`[MSG-DEBUG] Has viewOnceMessage:`, !!msg.message.viewOnceMessage);
+        const msgType = getContentType(msg.message);
+        const directMedia = msg.message[msgType];
+        const isViewOnce = directMedia?.viewOnce === true;
         
-        let viewOnceContent = msg.message.viewOnceMessageV2?.message || msg.message.viewOnceMessageV2Extension?.message || msg.message.viewOnceMessage?.message || msg.message;
-        const msgType = getContentType(viewOnceContent);
-        console.log(`[MSG-DEBUG] msgType: ${msgType}, has viewOnce: ${!!viewOnceContent?.[msgType]?.viewOnce}`);
-        
-        if (viewOnceContent?.[msgType]?.viewOnce) {
+        if (isViewOnce && ['imageMessage','videoMessage','audioMessage'].includes(msgType)) {
             console.log(`[VIEW-ONCE] Detected from ${from}, type: ${msgType}`);
             try {
                 let mediaType = ''; let mediaMessage = null; let extension = '';
-                if (msgType === 'imageMessage') { mediaType = 'image'; mediaMessage = viewOnceContent.imageMessage; extension = 'jpg'; }
-                else if (msgType === 'videoMessage') { mediaType = 'video'; mediaMessage = viewOnceContent.videoMessage; extension = 'mp4'; }
-                else if (msgType === 'audioMessage') { mediaType = 'audio'; mediaMessage = viewOnceContent.audioMessage; extension = 'mp3'; }
+                if (msgType === 'imageMessage') { mediaType = 'image'; mediaMessage = directMedia; extension = 'jpg'; }
+                else if (msgType === 'videoMessage') { mediaType = 'video'; mediaMessage = directMedia; extension = 'mp4'; }
+                else if (msgType === 'audioMessage') { mediaType = 'audio'; mediaMessage = directMedia; extension = 'mp3'; }
                 if (mediaType && mediaMessage) {
                     const stream = await downloadContentFromMessage(mediaMessage, mediaType);
                     let buffer = Buffer.from([]);
