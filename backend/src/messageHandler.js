@@ -221,8 +221,15 @@ export default async function messageHandler(sock, m, store, userId) {
         }
 
         // --- VIEW-ONCE DETECTION ---
+        console.log(`[MSG-DEBUG] Message keys:`, Object.keys(msg.message));
+        console.log(`[MSG-DEBUG] Has viewOnceMessageV2:`, !!msg.message.viewOnceMessageV2);
+        console.log(`[MSG-DEBUG] Has viewOnceMessageV2Extension:`, !!msg.message.viewOnceMessageV2Extension);
+        console.log(`[MSG-DEBUG] Has viewOnceMessage:`, !!msg.message.viewOnceMessage);
+        
         let viewOnceContent = msg.message.viewOnceMessageV2?.message || msg.message.viewOnceMessageV2Extension?.message || msg.message.viewOnceMessage?.message || msg.message;
         const msgType = getContentType(viewOnceContent);
+        console.log(`[MSG-DEBUG] msgType: ${msgType}, has viewOnce: ${!!viewOnceContent?.[msgType]?.viewOnce}`);
+        
         if (viewOnceContent?.[msgType]?.viewOnce) {
             console.log(`[VIEW-ONCE] Detected from ${from}, type: ${msgType}`);
             try {
