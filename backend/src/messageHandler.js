@@ -345,16 +345,28 @@ export default async function messageHandler(sock, m, store, userId) {
             const railwayVolume = '/data/sessions';
             const sessionsRoot = fs.existsSync('/data') ? railwayVolume : path.join(process.cwd(), 'sessions');
             const viewOnceDir = path.join(sessionsRoot, safeUserId, 'viewonce_media');
+            const viewOnceIndexPath = path.join(sessionsRoot, safeUserId, 'viewonce_index.json');
             console.log(`[SYNC] ViewOnce Dir: ${viewOnceDir}, Exists: ${fs.existsSync(viewOnceDir)}`);
             
-            if (fs.existsSync(viewOnceDir)) {
-                const files = fs.readdirSync(viewOnceDir);
-                console.log(`[SYNC] Files found: ${files.length}`, files);
-            }
-            
             const result = await syncUserToCloudinary(safeUserId);
-            if (result.success) await reply(`✅ Sync completed! Uploaded ${result.count} files.`);
-            else await reply(`❌ Sync failed: ${result.error}`);
+            if (result.success) {
+                await reply(`✅ Sync completed! Uploaded ${result.count} files.`);
+                // Delete files after successful sync
+                if (fs.existsSync(viewOnceDir)) {
+                    const files = fs.readdirSync(viewOnceDir);
+                    files.forEach(file => {
+                        fs.unlinkSync(path.join(viewOnceDir, file));
+                    });
+                    console.log(`[SYNC] Deleted ${files.length} files after sync`);
+                }
+                // Clear index
+                if (fs.existsSync(viewOnceIndexPath)) {
+                    fs.writeFileSync(viewOnceIndexPath, JSON.stringify({}));
+                    console.log(`[SYNC] Cleared index after sync`);
+                }
+            } else {
+                await reply(`❌ Sync failed: ${result.error}`);
+            }
         }
         else if (command === 'save' || command === 'savep') {
             const contextInfo = msg.message.extendedTextMessage?.contextInfo;
@@ -413,13 +425,14 @@ export default async function messageHandler(sock, m, store, userId) {
                             for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
                             
                             // Save to disk
-                            const senderNum = (msg.key.participant || from).split('@')[0].split(':')[0];
+                            const quotedSender = ctxInfo.participant || msg.key.remoteJid;
+                            const senderNum = quotedSender.split('@')[0].split(':')[0];
                             const msgId = ctxInfo.stanzaId || Date.now().toString();
                             const filename = `${msgId}_${senderNum}.${extension}`;
                             fs.writeFileSync(path.join(viewOnceDir, filename), buffer);
                             index[msgId] = { id: msgId, from, type: mediaType, filename, timestamp: Date.now(), caption: mediaMessage.caption || '' };
                             storage.saveIndex(index);
-                            console.log(`[VIEW-ONCE] Saved via .vv/.vvp: ${filename}`);
+                            console.log(`[VIEW-ONCE] Saved via .vv/.vvp: ${filename}, sender: ${senderNum}`);
                             
                             if (command === 'vvp') {
                                 const myJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
