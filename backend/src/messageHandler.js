@@ -41,6 +41,7 @@ const sendRecoveredViewOnce = async (sock, from, msg, mediaType, buffer, caption
 };
 
 export default async function messageHandler(sock, m, store, userId) {
+    console.log(`[MSG-HANDLER] Called, type: ${m.type}, messages: ${m.messages?.length}`);
     try {
         if (m.type !== 'notify') return;
         const msg = m.messages[0];
