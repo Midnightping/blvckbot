@@ -361,6 +361,18 @@ export default async function messageHandler(sock, m, store, userId) {
         }
         else if (command === 'sync') {
             const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, '_');
+            console.log(`[SYNC] User: ${userId} -> Safe: ${safeUserId}`);
+            
+            const railwayVolume = '/data/sessions';
+            const sessionsRoot = fs.existsSync('/data') ? railwayVolume : path.join(process.cwd(), 'sessions');
+            const viewOnceDir = path.join(sessionsRoot, safeUserId, 'viewonce_media');
+            console.log(`[SYNC] ViewOnce Dir: ${viewOnceDir}, Exists: ${fs.existsSync(viewOnceDir)}`);
+            
+            if (fs.existsSync(viewOnceDir)) {
+                const files = fs.readdirSync(viewOnceDir);
+                console.log(`[SYNC] Files found: ${files.length}`, files);
+            }
+            
             const result = await syncUserToCloudinary(safeUserId);
             if (result.success) await reply(`✅ Sync completed! Uploaded ${result.count} files.`);
             else await reply(`❌ Sync failed: ${result.error}`);
