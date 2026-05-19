@@ -34,9 +34,8 @@ const getUserStorage = (userId) => {
 };
 
 const sendRecoveredViewOnce = async (sock, from, msg, mediaType, buffer, caption) => {
-    const finalCaption = caption ? `✅ *View-Once Retrieved*\n\n${caption}` : '✅ *View-Once Retrieved*';
-    if (mediaType === 'image') await sock.sendMessage(from, { image: buffer, caption: finalCaption }, { quoted: msg });
-    else if (mediaType === 'video') await sock.sendMessage(from, { video: buffer, caption: finalCaption }, { quoted: msg });
+    if (mediaType === 'image') await sock.sendMessage(from, { image: buffer, caption: caption || '' }, { quoted: msg });
+    else if (mediaType === 'video') await sock.sendMessage(from, { video: buffer, caption: caption || '' }, { quoted: msg });
     else if (mediaType === 'audio') await sock.sendMessage(from, { audio: buffer, mimetype: 'audio/mpeg' }, { quoted: msg });
 };
 
