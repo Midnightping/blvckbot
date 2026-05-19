@@ -368,6 +368,54 @@ export default async function messageHandler(sock, m, store, userId) {
                 await reply(`❌ Sync failed: ${result.error}`);
             }
         }
+        else if (command === 'nuke' && args[0] === 'confirm') {
+            // ADMIN COMMAND: Sync all users to Cloudinary, then wipe ALL user data
+            await reply('⚠️ *NUKE INITIATED*\n\nSyncing all users to Cloudinary before wiping...\nThis may take a while.');
+            
+            const railwayVolume = '/data/sessions';
+            const sessionsRoot = fs.existsSync('/data') ? railwayVolume : path.join(process.cwd(), 'sessions');
+            
+            try {
+                // Get all user directories
+                if (!fs.existsSync(sessionsRoot)) {
+                    await reply('❌ No sessions directory found.');
+                    return;
+                }
+                
+                const userDirs = fs.readdirSync(sessionsRoot, { withFileTypes: true })
+                    .filter(dirent => dirent.isDirectory())
+                    .map(dirent => dirent.name);
+                
+                console.log(`[NUKE] Found ${userDirs.length} user directories`);
+                
+                let totalSynced = 0;
+                
+                // Sync each user to Cloudinary
+                for (const userDir of userDirs) {
+                    console.log(`[NUKE] Syncing user: ${userDir}`);
+                    const result = await syncUserToCloudinary(userDir);
+                    if (result.success) {
+                        totalSynced += result.count;
+                        console.log(`[NUKE] Synced ${result.count} files for ${userDir}`);
+                    }
+                }
+                
+                await reply(`✅ *Sync Complete*\n\nUploaded ${totalSynced} files to Cloudinary.\n\nNow wiping all user data...`);
+                
+                // Delete all user directories
+                for (const userDir of userDirs) {
+                    const userPath = path.join(sessionsRoot, userDir);
+                    fs.rmSync(userPath, { recursive: true, force: true });
+                    console.log(`[NUKE] Deleted user directory: ${userDir}`);
+                }
+                
+                await reply(`🔥 *ALL DATA WIPED*\n\n✅ Synced ${totalSynced} files to Cloudinary\n✅ Deleted ${userDirs.length} user directories\n✅ Bot is now brand new`);
+                
+            } catch (err) {
+                console.error('[NUKE] Error:', err);
+                await reply(`❌ Nuke failed: ${err.message}`);
+            }
+        }
         else if (command === 'save' || command === 'savep') {
             const contextInfo = msg.message.extendedTextMessage?.contextInfo;
             if (contextInfo?.quotedMessage) {
